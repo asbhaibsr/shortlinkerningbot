@@ -1,23 +1,21 @@
 # config.py
 
 # --- Bot Token ---
-BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN_HERE"  # <-- इसे अपने असली बॉटफादर टोकन से बदलें
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN_HERE") # <-- यह लाइन ऐसी होनी चाहिए
 
 # --- MongoDB Connection Strings ---
-# MongoDB Instance 1 (यूज़र डेटा, बैलेंस, शॉर्टलिंक काउंट, भाषा के लिए)
-MONGO_URI_1 = "YOUR_MONGODB_URI_1"  # <-- अपने पहले MongoDB URI से बदलें (e.g., "mongodb://localhost:27017/bot_db_1")
-DB_NAME_1 = "bot_db_1"              # <-- अपने पहले डेटाबेस का नाम
+MONGO_URI_1 = os.environ.get("MONGO_URI_1", "YOUR_MONGODB_URI_1") # <-- यह लाइन ऐसी होनी चाहिए
+DB_NAME_1 = os.environ.get("DB_NAME_1", "bot_db_1")
 
-# MongoDB Instance 2 (विथड्रॉल रिक्वेस्ट के लिए)
-MONGO_URI_2 = "YOUR_MONGODB_URI_2"  # <-- अपने दूसरे MongoDB URI से बदलें (e.g., "mongodb://localhost:27017/bot_db_2")
-DB_NAME_2 = "bot_db_2"              # <-- अपने दूसरे डेटाबेस का नाम
+MONGO_URI_2 = os.environ.get("MONGO_URI_2", "YOUR_MONGODB_URI_2") # <-- यह लाइन ऐसी होनी चाहिए
+DB_NAME_2 = os.environ.get("DB_NAME_2", "bot_db_2")
 
 # --- Admin Notification Channel ---
-ADMIN_WITHDRAWAL_CHANNEL_ID = -1001234567890  # <-- इसे अपने एडमिन चैनल की असली ID से बदलें (यह -100 से शुरू होती है)
+ADMIN_WITHDRAWAL_CHANNEL_ID = int(os.environ.get("ADMIN_WITHDRAWAL_CHANNEL_ID", "-1002703675582")) # <-- यह लाइन ऐसी होनी चाहिए
 
 # --- Shortlink API Configuration ---
-SHORTLINK_API_URL = "https://api.shrtco.de/v2/shorten" # यह एक उदाहरण API है। इसे अपनी सेवा के URL से बदलें।
-SHORTLINK_API_KEY = "YOUR_SHORTLINK_API_KEY_HERE"     # अपनी सेवा की API कुंजी (यदि आवश्यक हो)।
+SHORTLINK_API_URL = os.environ.get("SHORTLINK_API_URL", "dashboard.smallshorts.com")
+SHORTLINK_API_KEY = os.environ.get("SHORTLINK_API_KEY", "4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0")
 
 # --- Global Constants ---
 POINTS_PER_SHORTLINK = 1.0  # प्रत्येक शॉर्टलिंक को सॉल्व करने पर यूज़र को 1 पॉइंट मिलता है
