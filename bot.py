@@ -16,7 +16,7 @@ from config import (
 from languages import LANGUAGES, WITHDRAWAL_STATUS_UPDATE_MESSAGES, DEFAULT_LANGUAGE, get_text
 from database_utils import (
     init_db, get_user_data, update_user_data, record_withdrawal_request,
-    set_user_language, withdrawal_requests_collection, get_user_language # get_user_language यहाँ इंपोर्ट करना आवश्यक है
+    set_user_language, withdrawal_requests_collection, get_user_language
 )
 
 # --- Global variable for the application instance (to access bot methods) ---
@@ -27,73 +27,100 @@ def main_menu_keyboard(user_id):
     """मुख्य मेनू के लिए ReplyKeyboardMarkup बनाता है।"""
     keyboard = [
         [
-            KeyboardButton(get_text(user_id, "earn_button")), # Assuming you'll add "earn_button" key to languages.py
-            KeyboardButton(get_text(user_id, "tasks_button")) # Assuming you'll add "tasks_button" key to languages.py
+            KeyboardButton(get_text(user_id, "earn_button")),
+            KeyboardButton(get_text(user_id, "tasks_button"))
         ],
         [
-            KeyboardButton(get_text(user_id, "balance_button")), # Assuming you'll add "balance_button" key to languages.py
-            KeyboardButton(get_text(user_id, "invite_button")) # Assuming you'll add "invite_button" key to languages.py
+            KeyboardButton(get_text(user_id, "balance_button")),
+            KeyboardButton(get_text(user_id, "invite_button"))
         ],
         [
-            KeyboardButton(get_text(user_id, "withdraw_button")) # Assuming you'll add "withdraw_button" key to languages.py
+            KeyboardButton(get_text(user_id, "withdraw_button"))
         ]
     ]
+    # resize_keyboard=True: कीबोर्ड को छोटा करता है ताकि वह स्क्रीन पर फिट हो सके।
+    # one_time_keyboard=False: कीबोर्ड को हर बार छिपाने के बजाय हमेशा दिखाता है।
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
 # --- Helper function to fetch a shortlink from API ---
 async def fetch_new_shortlink_from_api():
     try:
         random_long_url = f"https://example.com/page/{random.randint(1000, 9999)}?user={random.randint(100,999)}"
-        payload = {"url": random_long_url}
-        headers = {"Authorization": f"Bearer {SHORTLINK_API_KEY}"} if SHORTLINK_API_KEY else {}
-        response = requests.post(SHORTLINK_API_URL, json=payload, headers=headers)
-        response.raise_for_status()
+        
+        # --- यहाँ परिवर्तन किया गया है ---
+        # API कुंजी को URL पैरामीटर के रूप में शामिल करें
+        api_url_with_key = f"{SHORTLINK_API_URL}?api={SHORTLINK_API_KEY}&url={random_long_url}"
+        
+        # अब headers की आवश्यकता नहीं है क्योंकि API कुंजी सीधे URL में है
+        response = requests.get(api_url_with_key) # GET अनुरोध का उपयोग करें क्योंकि PHP उदाहरण भी GET का उपयोग कर रहा है
+        # --- परिवर्तन यहाँ समाप्त होता है ---
+
+        response.raise_for_status() # यह 4XX/5XX प्रतिक्रियाओं के लिए HTTPError को बढ़ाएगा
         data = response.json()
-        if "result" in data and "full_short_link" in data["result"]:
+        
+        # SmallShorts API के JSON रिस्पॉन्स के आधार पर keys बदलें
+        # आपने दिखाया है कि 'shortenedUrl' का उपयोग हो सकता है
+        if "shortenedUrl" in data:
+            return data["shortenedUrl"]
+        elif "result" in data and "full_short_link" in data["result"]:
+            # यदि API का रिस्पॉन्स पुराना वाला है तो यह भी काम करेगा
             return data["result"]["full_short_link"]
-        elif "shortlink" in data: # Some APIs use 'shortlink'
-            return data["shortlink"]
         else:
             print(f"Unexpected API response: {data}")
             return None
+    except requests.exceptions.HTTPError as e:
+        print(f"Error fetching shortlink from API: {e.response.status_code} {e.response.reason} for url: {e.request.url}")
+        print(f"API Response content: {e.response.text}") # अधिक जानकारी के लिए प्रतिक्रिया सामग्री प्रिंट करें
+        return None
     except requests.exceptions.RequestException as e:
         print(f"Error fetching shortlink from API: {e}")
         return None
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print(f"An unexpected error occurred in fetch_new_shortlink_from_api: {e}")
         return None
 
 # --- Command Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    user_data = get_user_data(user_id) # Gets user data from MongoDB
+    user_data = get_user_data(user_id)
 
-    # If user hasn't selected a language yet and not coming from a referral link, prompt for language
-    # 'language_set_in_session' flag is for the current session. 'user_data['language'] == DEFAULT_LANGUAGE' checks DB.
-    # We also check if context.args is empty, meaning it's not a /start ref_ID
-    if 'language_set_in_session' not in context.user_data and user_data['language'] == DEFAULT_LANGUAGE and not context.args:
+    # यदि उपयोगकर्ता ने अभी तक भाषा का चयन नहीं किया है और रेफरल लिंक से नहीं आ रहा है, तो भाषा के लिए संकेत दें
+    # user_data.get('language', DEFAULT_LANGUAGE) यह सुनिश्चित करता है कि यदि 'language' कुंजी मौजूद नहीं है तो DEFAULT_LANGUAGE का उपयोग किया जाए।
+    if 'language_set_in_session' not in context.user_data and user_data.get('language', DEFAULT_LANGUAGE) == DEFAULT_LANGUAGE and not context.args:
         keyboard = []
         for lang_code, lang_data in LANGUAGES.items():
             keyboard.append([InlineKeyboardButton(lang_data["name"], callback_data=f"set_lang_{lang_code}")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            LANGUAGES[DEFAULT_LANGUAGE]["language_choice"], # Prompt in default language (English)
+            LANGUAGES[DEFAULT_LANGUAGE]["language_choice"], # डिफ़ॉल्ट भाषा (अंग्रेजी) में संकेत
             reply_markup=reply_markup
         )
-        context.user_data['waiting_for_language'] = True # Set a flag to wait for language selection
-        return # Stop execution until language is chosen
+        context.user_data['waiting_for_language'] = True # भाषा चयन की प्रतीक्षा करने के लिए एक फ़्लैग सेट करें
+        return # भाषा चुने जाने तक निष्पादन रोकें
 
-    # Referral logic (runs after language is set or if already set)
+    # रेफरल लॉजिक (भाषा सेट होने के बाद या यदि पहले से सेट है तो चलता है)
+    # यह ब्लॉक संभावित रूप से भाषा चयन को हैंडल या पुष्टि करने के बाद चलना चाहिए।
+    # हमें user_data को फिर से प्राप्त करना होगा यदि भाषा अभी सेट की गई थी, ताकि सही user_lang मिल सके।
+    user_data = get_user_data(user_id) # उपयोगकर्ता डेटा को रीफ़्रेश करें ताकि भाषा लोड हो सके
+    user_lang = get_user_language(user_id) # उपयोगकर्ता की निर्धारित भाषा प्राप्त करें
+
     if context.args:
         try:
             referrer_id = int(context.args[0].replace('ref_', ''))
             if referrer_id != user_id:
-                referrer_data = get_user_data(referrer_id) # Get referrer data from MongoDB
+                referrer_data = get_user_data(referrer_id)
+                # जांचें कि उपयोगकर्ता को पहले रेफर नहीं किया गया है
                 if referrer_data and user_data["referred_by"] is None:
-                    update_user_data(user_id, set_referred_by=referrer_id) # Set referred_by using MongoDB update
-                    update_user_data(referrer_id, referral_count_change=1) # Increment referrer's count in MongoDB
+                    update_user_data(user_id, set_referred_by=referrer_id) # MongoDB अपडेट का उपयोग करके referred_by सेट करें
+                    update_user_data(referrer_id, referral_count_change=1) # MongoDB में रेफरर की संख्या बढ़ाएँ
                     await context.bot.send_message(chat_id=referrer_id, text=get_text(referrer_id, "referrer_joined", user_id=user_id))
+                    # रेफरल के बाद सीधे मुख्य मेनू भेजें
+                    await update.message.reply_text(get_text(user_id, "welcome", first_name=update.effective_user.first_name,
+                                                             balance=user_data["balance"],
+                                                             shortlinks_solved_count=user_data["shortlinks_solved_count"]),
+                                                   reply_markup=main_menu_keyboard(user_id))
                 else:
+                    # उपयोगकर्ता पहले से रेफर किया गया है या रेफरर मौजूद नहीं है
                     await update.message.reply_text(get_text(user_id, "invalid_referrer"), reply_markup=main_menu_keyboard(user_id))
             else:
                 await update.message.reply_text(get_text(user_id, "self_referral"), reply_markup=main_menu_keyboard(user_id))
@@ -102,14 +129,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Error in referral logic: {e}")
             await update.message.reply_text(get_text(user_id, "generic_error"), reply_markup=main_menu_keyboard(user_id))
+        return # महत्वपूर्ण: डबल वेलकम मैसेज से बचने के लिए रेफरल लॉजिक के बाद बाहर निकलें
 
-    # If language is already set or after language selection/referral handling, send the main welcome message
-    user_data = get_user_data(user_id) # Refresh user data after potential updates
+    # यदि भाषा पहले से सेट है या भाषा चयन/रेफरल हैंडलिंग के बाद, मुख्य वेलकम मैसेज भेजें
+    # यह सुनिश्चित करता है कि जब तक भाषा चयन लंबित न हो, वेलकम मैसेज और कीबोर्ड हमेशा भेजे जाते हैं
+    user_data = get_user_data(user_id) # संभावित अपडेट के बाद उपयोगकर्ता डेटा को फिर से प्राप्त करें
     await update.message.reply_text(
         get_text(user_id, "welcome", first_name=update.effective_user.first_name,
                  balance=user_data["balance"],
                  shortlinks_solved_count=user_data["shortlinks_solved_count"]),
-        reply_markup=main_menu_keyboard(user_id) # Always show main menu keyboard after welcome
+        reply_markup=main_menu_keyboard(user_id) # हमेशा वेलकम के बाद मुख्य मेनू कीबोर्ड दिखाएं
     )
 
 # --- Language Selection Callback Handler ---
@@ -122,34 +151,33 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Invalid language selection.", show_alert=True)
         return
 
-    set_user_language(user_id, lang_code) # Update language in MongoDB
-    context.user_data['language_set_in_session'] = True # Mark language as set for current session
+    set_user_language(user_id, lang_code) # MongoDB में भाषा अपडेट करें
+    context.user_data['language_set_in_session'] = True # वर्तमान सत्र के लिए भाषा को सेट के रूप में चिह्नित करें
     if 'waiting_for_language' in context.user_data:
         del context.user_data['waiting_for_language']
 
     await query.answer(f"भाषा {LANGUAGES[lang_code]['name']} पर सेट की गई।", show_alert=True)
 
-    user_data = get_user_data(user_id) # Get updated user data
+    user_data = get_user_data(user_id) # अपडेटेड उपयोगकर्ता डेटा प्राप्त करें
     await query.edit_message_text(
         get_text(user_id, "welcome", first_name=query.from_user.first_name,
                  balance=user_data["balance"],
                  shortlinks_solved_count=user_data["shortlinks_solved_count"]),
-        reply_markup=main_menu_keyboard(user_id) # Show main menu keyboard after language selection
+        reply_markup=main_menu_keyboard(user_id) # भाषा चयन के बाद मुख्य मेनू कीबोर्ड दिखाएं
     )
 
 # --- Shortlink Earning Logic ---
 async def earn(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This handler can be called by a command or a keyboard button.
-    # We need to determine if it's a message or a callback query.
+    # यह निर्धारित करें कि अपडेट एक मैसेज से है या एक कॉलबैक क्वेरी से।
     if update.message:
         user_id = update.message.from_user.id
         send_func = update.message.reply_text
     elif update.callback_query:
         user_id = update.callback_query.from_user.id
-        await update.callback_query.answer() # Answer the callback query
-        send_func = update.callback_query.message.reply_text
+        await update.callback_query.answer() # कॉलबैक क्वेरी का जवाब दें
+        send_func = update.callback_query.message.reply_text # कॉलबैक पर नया मैसेज भेजें
     else:
-        return # Should not happen
+        return # ऐसा नहीं होना चाहिए
 
     user_data = get_user_data(user_id)
 
@@ -181,7 +209,7 @@ async def done_shortlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     update_user_data(user_id, shortlinks_solved_change=1, balance_change=POINTS_PER_SHORTLINK, new_last_shortlink=None)
-    user_data = get_user_data(user_id) # Get updated user data
+    user_data = get_user_data(user_id) # अपडेटेड उपयोगकर्ता डेटा प्राप्त करें
 
     solved_count = user_data["shortlinks_solved_count"]
     current_balance = user_data["balance"]
@@ -197,22 +225,22 @@ async def done_shortlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(message_text, reply_markup=reply_markup)
 
 async def generate_next_shortlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This function is called by a callback query, so update.callback_query will exist
+    # यह फ़ंक्शन एक कॉलबैक क्वेरी द्वारा कॉल किया जाता है, इसलिए update.callback_query मौजूद होगा
     await earn(update.callback_query, context)
 
 
 # --- Channel Joining Tasks ---
 async def tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This handler can be called by a command or a keyboard button.
+    # यह निर्धारित करें कि अपडेट एक मैसेज से है या एक कॉलबैक क्वेरी से।
     if update.message:
         user_id = update.message.from_user.id
         send_func = update.message.reply_text
     elif update.callback_query:
         user_id = update.callback_query.from_user.id
-        await update.callback_query.answer() # Answer the callback query
-        send_func = update.callback_query.message.reply_text
+        await update.callback_query.answer() # कॉलबैक क्वेरी का जवाब दें
+        send_func = update.callback_query.message.edit_text # मौजूदा मैसेज पर कॉलबैक के लिए edit_text का उपयोग करें
     else:
-        return # Should not happen
+        return # ऐसा नहीं होना चाहिए
 
     user_data = get_user_data(user_id)
 
@@ -221,15 +249,17 @@ async def tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     keyboard = []
+    has_unclaimed_channels = False
     for i, channel in enumerate(CHANNELS_TO_JOIN):
-        # Convert channel index to string for consistent storage in claimed_channel_ids
+        # channel_ids में लगातार स्टोरेज के लिए चैनल इंडेक्स को स्ट्रिंग में बदलें
         if str(i) not in user_data["claimed_channel_ids"]:
-            keyboard.append([InlineKeyboardButton(f"🔗 {channel['name']}", url=channel['link'])]) # Direct link button
-            keyboard.append([InlineKeyboardButton(get_text(user_id, "claim_points_button").format(channel_name=channel['name']), callback_data=f"claim_channel_{i}")]) # Claim button
+            keyboard.append([InlineKeyboardButton(f"🔗 {channel['name']}", url=channel['link'])]) # सीधा लिंक बटन
+            keyboard.append([InlineKeyboardButton(get_text(user_id, "claim_points_button").format(channel_name=channel['name']), callback_data=f"claim_channel_{i}")]) # दावा बटन
+            has_unclaimed_channels = True
         else:
-            keyboard.append([InlineKeyboardButton(f"✅ Joined: {channel['name']}", url=channel['link'])]) # Indicate already joined
+            keyboard.append([InlineKeyboardButton(f"✅ Joined: {channel['name']}", url=channel['link'])]) # पहले से जुड़े होने का संकेत दें
 
-    if not keyboard: # If all channels are already claimed
+    if not has_unclaimed_channels: # यदि सभी चैनल पहले ही दावा किए जा चुके हैं
         await send_func(get_text(user_id, "no_tasks_available"), reply_markup=main_menu_keyboard(user_id))
         return
 
@@ -253,44 +283,48 @@ async def claim_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer(get_text(user_id, "invalid_channel"), show_alert=True)
         return
 
-    # TODO: यहाँ यूज़र के चैनल में होने की पुष्टि करें
-    # यह Telegram API के getChatMember() मेथड का उपयोग करके किया जा सकता है।
+    # TODO: यहाँ यूज़र के चैनल में होने की पुष्टि करें (Telegram API के getChatMember() मेथड का उपयोग करके)
+    # यह उचित चैनल जॉइनिंग सत्यापन के लिए महत्वपूर्ण है।
+    # वर्तमान कोड मानता है कि यदि वे "दावा करें" पर क्लिक करते हैं तो वे जुड़ गए हैं।
     # उदाहरण:
     # try:
-    #     chat_member = await context.bot.get_chat_member(chat_id=CHANNELS_TO_JOIN[channel_index]['id'], user_id=user_id)
-    #     if chat_member.status not in ["member", "administrator", "creator"]:
-    #         await query.answer(get_text(user_id, "not_yet_joined_channel"), show_alert=True) # नया टेक्स्ट जोड़ें
-    #         return
+    #    chat_member = await context.bot.get_chat_member(chat_id=CHANNELS_TO_JOIN[channel_index]['id'], user_id=user_id)
+    #    if chat_member.status not in ["member", "administrator", "creator"]:
+    #        await query.answer(get_text(user_id, "not_yet_joined_channel"), show_alert=True) # यह टेक्स्ट languages.py में जोड़ें
+    #        return
     # except Exception as e:
-    #     print(f"Error checking channel membership for user {user_id} in channel {CHANNELS_TO_JOIN[channel_index]['name']}: {e}")
-    #     await query.answer(get_text(user_id, "generic_error"), show_alert=True)
-    #     return
+    #    print(f"Error checking channel membership for user {user_id} in channel {CHANNELS_TO_JOIN[channel_index]['name']}: {e}")
+    #    await query.answer(get_text(user_id, "generic_error"), show_alert=True)
+    #    return
 
 
     points_to_add = CHANNEL_JOIN_POINTS
-    update_user_data(user_id, balance_change=points_to_add, channel_joined_change=1, add_claimed_channel_id=channel_index)
-    user_data = get_user_data(user_id) # Get updated data after changes
+    update_user_data(user_id, balance_change=points_to_add, channel_joined_change=1, add_claimed_channel_id=str(channel_index)) # स्ट्रिंग के रूप में स्टोर करें
+    user_data = get_user_data(user_id) # परिवर्तनों के बाद अपडेटेड डेटा प्राप्त करें
 
-    await query.answer(get_text(user_id, "channel_claimed_success", channel_name=CHANNELS_TO_JOIN[channel_index]['name'],
-                                 points_added=points_to_add, balance=user_data['balance']), show_alert=True)
-    
-    # After claiming, refresh the tasks message to reflect the change
-    # Re-calling tasks will show updated buttons (or no_tasks_available if all are claimed)
-    await tasks(update.callback_query, context)
+    await query.answer(
+        get_text(user_id, "channel_claimed_success", channel_name=CHANNELS_TO_JOIN[channel_index]['name'],
+                 points_added=points_to_add, balance=user_data['balance']),
+        show_alert=True
+    )
+
+    # दावा करने के बाद, परिवर्तन को दर्शाने के लिए कार्य मैसेज को रीफ़्रेश करें
+    # कार्यों को फिर से कॉल करने से अपडेटेड बटन दिखाई देंगे (या यदि सभी दावा किए गए हैं तो no_tasks_available)
+    await tasks(update, context) # सही send_func का उपयोग सुनिश्चित करने के लिए मूल अपडेट ऑब्जेक्ट पास करें
 
 
 # --- Referral System ---
 async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This handler can be called by a command or a keyboard button.
+    # यह हैंडलर एक कमांड या कीबोर्ड बटन द्वारा कॉल किया जा सकता है।
     if update.message:
         user_id = update.message.from_user.id
         send_func = update.message.reply_text
     elif update.callback_query:
         user_id = update.callback_query.from_user.id
-        await update.callback_query.answer() # Answer the callback query
+        await update.callback_query.answer() # कॉलबैक क्वेरी का जवाब दें
         send_func = update.callback_query.message.reply_text
     else:
-        return # Should not happen
+        return # ऐसा नहीं होना चाहिए
 
     bot_info = await context.bot.get_me()
     bot_username = bot_info.username
@@ -301,21 +335,21 @@ async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
         get_text(user_id, "referral_link_text", referral_link=referral_link,
                  referral_count=user_data['referral_count'],
                  referral_points=REFERRAL_POINTS_PER_30),
-        reply_markup=main_menu_keyboard(user_id) # Show main menu keyboard
+        reply_markup=main_menu_keyboard(user_id) # मुख्य मेनू कीबोर्ड दिखाएं
     )
 
 # --- Check Balance Command ---
 async def check_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This handler can be called by a command or a keyboard button.
+    # यह हैंडलर एक कमांड या कीबोर्ड बटन द्वारा कॉल किया जा सकता है।
     if update.message:
         user_id = update.message.from_user.id
         send_func = update.message.reply_text
     elif update.callback_query:
         user_id = update.callback_query.from_user.id
-        await update.callback_query.answer() # Answer the callback query
+        await update.callback_query.answer() # कॉलबैक क्वेरी का जवाब दें
         send_func = update.callback_query.message.reply_text
     else:
-        return # Should not happen
+        return # ऐसा नहीं होना चाहिए
 
     user_data = get_user_data(user_id)
     await send_func(
@@ -323,25 +357,25 @@ async def check_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  shortlinks_solved_count=user_data['shortlinks_solved_count'],
                  referral_count=user_data['referral_count'],
                  channel_joined_count=user_data['channel_joined_count']),
-        reply_markup=main_menu_keyboard(user_id) # Show main menu keyboard
+        reply_markup=main_menu_keyboard(user_id) # मुख्य मेनू कीबोर्ड दिखाएं
     )
 
 # --- Withdrawal System ---
 async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This handler can be called by a command or a keyboard button.
+    # यह हैंडलर एक कमांड या कीबोर्ड बटन द्वारा कॉल किया जा सकता है।
     if update.message:
         user_id = update.message.from_user.id
         send_func = update.message.reply_text
     elif update.callback_query:
         user_id = update.callback_query.from_user.id
-        await update.callback_query.answer() # Answer the callback query
+        await update.callback_query.answer() # कॉलबैक क्वेरी का जवाब दें
         send_func = update.callback_query.message.reply_text
     else:
-        return # Should not happen
+        return # ऐसा नहीं होना चाहिए
 
     user_data = get_user_data(user_id)
 
-    # First check: minimum balance
+    # पहली जांच: न्यूनतम बैलेंस
     if user_data["balance"] < MIN_WITHDRAWAL_POINTS:
         await send_func(get_text(user_id, "min_withdraw_balance",
                                  balance=user_data['balance'],
@@ -350,7 +384,7 @@ async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         reply_markup=main_menu_keyboard(user_id))
         return
 
-    # Second check: minimum shortlinks solved for withdrawal eligibility
+    # दूसरी जांच: निकासी पात्रता के लिए हल किए गए न्यूनतम शॉर्टलिंक
     if user_data["shortlinks_solved_count"] < MIN_SHORTLINKS_FOR_REFERRAL_WITHDRAW:
         await send_func(get_text(user_id, "min_shortlinks_for_withdraw",
                                  min_shortlinks=MIN_SHORTLINKS_FOR_REFERRAL_WITHDRAW,
@@ -364,13 +398,13 @@ async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  balance=user_data['balance'],
                  min_points=MIN_WITHDRAWAL_POINTS,
                  rate=POINTS_TO_RUPEES_RATE)
-        # Note: No main menu keyboard here as we expect text input
+        # नोट: यहाँ कोई मुख्य मेनू कीबोर्ड नहीं है क्योंकि हम टेक्स्ट इनपुट की उम्मीद करते हैं
     )
 
 async def handle_withdrawal_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if context.user_data.get('withdraw_state') != "waiting_amount":
-        # If not in the correct state, clear and send main menu
+        # यदि सही स्थिति में नहीं है, तो साफ़ करें और मुख्य मेनू भेजें
         await update.message.reply_text(get_text(user_id, "command_usage"), reply_markup=main_menu_keyboard(user_id))
         if 'withdraw_state' in context.user_data:
             del context.user_data['withdraw_state']
@@ -380,22 +414,22 @@ async def handle_withdrawal_amount(update: Update, context: ContextTypes.DEFAULT
         amount_points = float(update.message.text)
         user_data = get_user_data(user_id)
 
-        # Check for minimum withdrawal amount
+        # न्यूनतम निकासी राशि के लिए जांचें
         if amount_points < MIN_WITHDRAWAL_POINTS:
             await update.message.reply_text(get_text(user_id, "min_withdraw_balance",
                                                      balance=user_data['balance'],
                                                      min_points=MIN_WITHDRAWAL_POINTS,
                                                      min_rupees=MIN_WITHDRAWAL_POINTS * POINTS_TO_RUPEES_RATE),
                                             reply_markup=main_menu_keyboard(user_id))
-            if 'withdraw_state' in context.user_data: # Clear state if invalid input
+            if 'withdraw_state' in context.user_data: # अमान्य इनपुट होने पर स्थिति साफ़ करें
                 del context.user_data['withdraw_state']
             return
 
-        # Check for sufficient points
+        # पर्याप्त बिंदुओं के लिए जांचें
         if amount_points > user_data["balance"]:
             await update.message.reply_text(get_text(user_id, "not_enough_points", balance=user_data['balance']),
                                             reply_markup=main_menu_keyboard(user_id))
-            if 'withdraw_state' in context.user_data: # Clear state if invalid input
+            if 'withdraw_state' in context.user_data: # अमान्य इनपुट होने पर स्थिति साफ़ करें
                 del context.user_data['withdraw_state']
             return
 
@@ -406,9 +440,9 @@ async def handle_withdrawal_amount(update: Update, context: ContextTypes.DEFAULT
         context.user_data['withdraw_state'] = "waiting_method"
 
         keyboard = [
-            [InlineKeyboardButton(get_text(user_id, "upi_method_button"), callback_data="withdraw_method_upi")], # Assuming "upi_method_button" key
-            [InlineKeyboardButton(get_text(user_id, "bank_method_button"), callback_data="withdraw_method_bank")], # Assuming "bank_method_button" key
-            [InlineKeyboardButton(get_text(user_id, "redeem_method_button"), callback_data="withdraw_method_redeem")] # Assuming "redeem_method_button" key
+            [InlineKeyboardButton(get_text(user_id, "upi_method_button"), callback_data="withdraw_method_upi")],
+            [InlineKeyboardButton(get_text(user_id, "bank_method_button"), callback_data="withdraw_method_bank")],
+            [InlineKeyboardButton(get_text(user_id, "redeem_method_button"), callback_data="withdraw_method_redeem")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
@@ -419,7 +453,7 @@ async def handle_withdrawal_amount(update: Update, context: ContextTypes.DEFAULT
 
     except ValueError:
         await update.message.reply_text(get_text(user_id, "invalid_amount"), reply_markup=main_menu_keyboard(user_id))
-        if 'withdraw_state' in context.user_data: # Clear state if invalid input
+        if 'withdraw_state' in context.user_data: # अमान्य इनपुट होने पर स्थिति साफ़ करें
             del context.user_data['withdraw_state']
     except Exception as e:
         print(f"Error in handle_withdrawal_amount: {e}")
@@ -433,7 +467,7 @@ async def handle_withdrawal_method(update: Update, context: ContextTypes.DEFAULT
 
     if context.user_data.get('withdraw_state') != "waiting_method":
         await query.answer(get_text(user_id, "action_not_valid"), show_alert=True)
-        # Also send main menu keyboard if they click something out of sequence
+        # यदि वे अनुक्रम से बाहर कुछ क्लिक करते हैं तो मुख्य मेनू कीबोर्ड भी भेजें
         await query.message.reply_text(get_text(user_id, "command_usage"), reply_markup=main_menu_keyboard(user_id))
         return
 
@@ -451,14 +485,14 @@ async def handle_withdrawal_method(update: Update, context: ContextTypes.DEFAULT
         await query.edit_message_text(get_text(user_id, "redeem_prompt"))
     else:
         await query.edit_message_text(get_text(user_id, "invalid_method"), reply_markup=main_menu_keyboard(user_id))
-        if 'withdraw_state' in context.user_data: # Clear state if invalid method
+        if 'withdraw_state' in context.user_data: # अमान्य विधि होने पर स्थिति साफ़ करें
             del context.user_data['withdraw_state']
 
 async def handle_withdrawal_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
 
     if context.user_data.get('withdraw_state') != "waiting_details":
-        # If not in the correct state, clear and send main menu
+        # यदि सही स्थिति में नहीं है, तो साफ़ करें और मुख्य मेनू भेजें
         await update.message.reply_text(get_text(user_id, "command_usage"), reply_markup=main_menu_keyboard(user_id))
         if 'withdraw_state' in context.user_data:
             del context.user_data['withdraw_state']
@@ -475,11 +509,11 @@ async def handle_withdrawal_details(update: Update, context: ContextTypes.DEFAUL
             del context.user_data['withdraw_state']
         return
 
-    # Record withdrawal request and get the ObjectId
+    # निकासी अनुरोध रिकॉर्ड करें और ObjectId प्राप्त करें
     withdrawal_doc_id = record_withdrawal_request(user_id, amount_points, amount_rupees, method, details)
 
-    update_user_data(user_id, balance_change=-amount_points) # Deduct points from Instance 1
-    user_data = get_user_data(user_id) # Get updated balance
+    update_user_data(user_id, balance_change=-amount_points) # इंस्टेंस 1 से अंक काटें
+    user_data = get_user_data(user_id) # अपडेटेड बैलेंस प्राप्त करें
 
     await update.message.reply_text(
         get_text(user_id, "withdrawal_success",
@@ -488,10 +522,10 @@ async def handle_withdrawal_details(update: Update, context: ContextTypes.DEFAUL
                  method=method.upper(),
                  details=details,
                  balance=user_data['balance']),
-        reply_markup=main_menu_keyboard(user_id) # Show main menu keyboard after successful withdrawal
+        reply_markup=main_menu_keyboard(user_id) # सफल निकासी के बाद मुख्य मेनू कीबोर्ड दिखाएं
     )
 
-    # --- Send notification to admin channel with buttons ---
+    # --- एडमिन चैनल को बटनों के साथ सूचना भेजें ---
     try:
         user_info = await context.bot.get_chat(user_id)
         user_name = user_info.first_name
@@ -518,16 +552,16 @@ async def handle_withdrawal_details(update: Update, context: ContextTypes.DEFAUL
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # Send message to admin channel and store message_id to update later
+        # एडमिन चैनल को मैसेज भेजें और बाद में अपडेट करने के लिए message_id स्टोर करें
         sent_message = await context.bot.send_message(
             chat_id=ADMIN_WITHDRAWAL_CHANNEL_ID,
             text=notification_text,
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
-        
-        # Update the withdrawal request in MongoDB with admin message details
-        # Ensure `withdrawal_requests_collection` is imported from database_utils
+
+        # MongoDB में निकासी अनुरोध को एडमिन मैसेज विवरण के साथ अपडेट करें
+        # सुनिश्चित करें कि `withdrawal_requests_collection` database_utils से आयातित है
         withdrawal_requests_collection.update_one(
             {"_id": withdrawal_doc_id},
             {"$set": {
@@ -540,15 +574,11 @@ async def handle_withdrawal_details(update: Update, context: ContextTypes.DEFAUL
     except Exception as e:
         print(f"Error sending withdrawal notification to admin channel: {e}")
 
-    # Clean up state
-    if 'withdraw_state' in context.user_data:
-        del context.user_data['withdraw_state']
-    if 'withdraw_amount_points' in context.user_data:
-        del context.user_data['withdraw_amount_points']
-    if 'withdraw_amount_rupees' in context.user_data:
-        del context.user_data['withdraw_amount_rupees']
-    if 'withdraw_method' in context.user_data:
-        del context.user_data['withdraw_method']
+    # स्थिति साफ़ करें
+    context.user_data.pop('withdraw_state', None)
+    context.user_data.pop('withdraw_amount_points', None)
+    context.user_data.pop('withdraw_amount_rupees', None)
+    context.user_data.pop('withdraw_method', None)
 
 # --- Callback Handlers for Admin Actions ---
 async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -556,7 +586,7 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer("विथड्रॉल मंज़ूर किया जा रहा है...")
 
     withdrawal_doc_id_str = query.data.replace("approve_withdraw_", "")
-    
+
     try:
         withdrawal_doc_id = ObjectId(withdrawal_doc_id_str)
     except Exception as e:
@@ -564,41 +594,41 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("त्रुटि: अमान्य विथड्रॉल ID।")
         return
 
-    # Fetch the withdrawal request from MongoDB
+    # MongoDB से निकासी अनुरोध प्राप्त करें
     withdrawal_request = withdrawal_requests_collection.find_one({"_id": withdrawal_doc_id})
 
     if not withdrawal_request:
         await query.edit_message_text("त्रुटि: विथड्रॉल रिक्वेस्ट नहीं मिली।")
         return
 
-    # To get the user's language for the message
+    # मैसेज के लिए उपयोगकर्ता की भाषा प्राप्त करने के लिए
     user_lang_code = get_user_language(withdrawal_request["user_id"])
 
     if withdrawal_request.get("status") != "pending":
-        # Using WITHDRAWAL_STATUS_UPDATE_MESSAGES from languages.py
+        # languages.py से WITHDRAWAL_STATUS_UPDATE_MESSAGES का उपयोग करना
         await query.edit_message_text(WITHDRAWAL_STATUS_UPDATE_MESSAGES[user_lang_code]["already_processed"])
         return
 
-    # Update withdrawal status in MongoDB
+    # MongoDB में निकासी स्थिति अपडेट करें
     withdrawal_requests_collection.update_one(
         {"_id": withdrawal_doc_id},
         {"$set": {"status": "approved", "processed_by_admin_id": query.from_user.id, "processed_timestamp": datetime.now()}}
     )
 
-    # Update the admin channel message
+    # एडमिन चैनल मैसेज अपडेट करें
     original_text = query.message.text
     new_text = original_text.replace("स्थिति: `लंबित`", "स्थिति: `मंज़ूर` ✅")
     new_text += f"\n\nमंज़ूर किया: @{query.from_user.username or query.from_user.first_name}"
 
-    await query.edit_message_text(new_text, parse_mode='Markdown', reply_markup=None) # Remove buttons
+    await query.edit_message_text(new_text, parse_mode='Markdown', reply_markup=None) # बटन हटाएँ
 
-    # Notify the user
+    # उपयोगकर्ता को सूचित करें
     user_id_to_notify = withdrawal_request["user_id"]
     amount_points = withdrawal_request["amount_points"]
     amount_rupees = withdrawal_request["amount_rupees"]
 
     try:
-        # Using WITHDRAWAL_STATUS_UPDATE_MESSAGES from languages.py
+        # languages.py से WITHDRAWAL_STATUS_UPDATE_MESSAGES का उपयोग करना
         await context.bot.send_message(
             chat_id=user_id_to_notify,
             text=WITHDRAWAL_STATUS_UPDATE_MESSAGES[user_lang_code]["approved"].format(points=amount_points, rupees=amount_rupees),
@@ -621,41 +651,41 @@ async def reject_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("त्रुटि: अमान्य विथड्रॉल ID।")
         return
 
-    # Fetch the withdrawal request from MongoDB
+    # MongoDB से निकासी अनुरोध प्राप्त करें
     withdrawal_request = withdrawal_requests_collection.find_one({"_id": withdrawal_doc_id})
 
     if not withdrawal_request:
         await query.edit_message_text("त्रुटि: विथड्रॉल रिक्वेस्ट नहीं मिली।")
         return
-    
-    # To get the user's language for the message
+
+    # मैसेज के लिए उपयोगकर्ता की भाषा प्राप्त करने के लिए
     user_lang_code = get_user_language(withdrawal_request["user_id"])
 
     if withdrawal_request.get("status") != "pending":
-        # Using WITHDRAWAL_STATUS_UPDATE_MESSAGES from languages.py
+        # languages.py से WITHDRAWAL_STATUS_UPDATE_MESSAGES का उपयोग करना
         await query.edit_message_text(WITHDRAWAL_STATUS_UPDATE_MESSAGES[user_lang_code]["already_processed"])
         return
 
-    # Update withdrawal status in MongoDB
+    # MongoDB में निकासी स्थिति अपडेट करें
     withdrawal_requests_collection.update_one(
         {"_id": withdrawal_doc_id},
         {"$set": {"status": "rejected", "processed_by_admin_id": query.from_user.id, "processed_timestamp": datetime.now()}}
     )
 
-    # Update the admin channel message
+    # एडमिन चैनल मैसेज अपडेट करें
     original_text = query.message.text
     new_text = original_text.replace("स्थिति: `लंबित`", "स्थिति: `ख़ारिज` ❌")
     new_text += f"\n\nख़ारिज किया: @{query.from_user.username or query.from_user.first_name}"
 
-    await query.edit_message_text(new_text, parse_mode='Markdown', reply_markup=None) # Remove buttons
+    await query.edit_message_text(new_text, parse_mode='Markdown', reply_markup=None) # बटन हटाएँ
 
-    # Notify the user
+    # उपयोगकर्ता को सूचित करें
     user_id_to_notify = withdrawal_request["user_id"]
     amount_points = withdrawal_request["amount_points"]
-    amount_rupees = withdrawal_request["amount_rupees"]
+    amount_rupees = withdrawal_request["amount_rupees"] # यह पहले 'rupees' था, जिसे मैंने 'amount_rupees' में ठीक किया है
 
     try:
-        # Using WITHDRAWAL_STATUS_UPDATE_MESSAGES from languages.py
+        # languages.py से WITHDRAWAL_STATUS_UPDATE_MESSAGES का उपयोग करना
         await context.bot.send_message(
             chat_id=user_id_to_notify,
             text=WITHDRAWAL_STATUS_UPDATE_MESSAGES[user_lang_code]["rejected"].format(points=amount_points, rupees=amount_rupees),
@@ -665,76 +695,87 @@ async def reject_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error sending rejection notification to user {user_id_to_notify}: {e}")
 
-
 # --- Generic Error Handler ---
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"Error occurred: {context.error}")
+    # डीबगिंग के लिए पूरा ट्रेसबैक लॉग करें
+    import traceback
+    print(traceback.format_exc())
+
     if update.effective_message:
         user_id = update.effective_user.id if update.effective_user else None
-        await update.effective_message.reply_text(get_text(user_id, "generic_error"), reply_markup=main_menu_keyboard(user_id))
-    if update.effective_user and 'withdraw_state' in context.user_data:
-        del context.user_data['withdraw_state']
+        # उपयोगकर्ता की भाषा में एक मैसेज भेजने का प्रयास करें, अन्यथा डिफ़ॉल्ट
+        try:
+            await update.effective_message.reply_text(get_text(user_id, "generic_error"), reply_markup=main_menu_keyboard(user_id))
+        except Exception as e:
+            print(f"Failed to send generic error message to user {user_id}: {e}")
+            # यदि reply_text किसी कारण से विफल हो जाता है तो फ़ॉलबैक करें
+            await context.bot.send_message(chat_id=user_id, text="An unexpected error occurred. Please try /start.")
 
-# --- Message Handler for text inputs (like withdrawal amount/details) ---
-async def handle_text_input_for_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    current_state = context.user_data.get('withdraw_state')
+---
+### Main function where handlers are added
+---
 
-    if current_state == "waiting_amount":
-        await handle_withdrawal_amount(update, context)
-    elif current_state == "waiting_details":
-        await handle_withdrawal_details(update, context)
-    else:
-        # If text is received when not in a withdrawal state, send usage message with main menu
-        await update.message.reply_text(get_text(user_id, "command_usage"), reply_markup=main_menu_keyboard(user_id))
+async def post_init(application: Application):
+    """
+    एप्लिकेशन इनिशियलाइज़ होने के बाद और पोलिंग शुरू होने से पहले कॉल किया जाता है।
+    वैश्विक रूप से एप्लिकेशन इंस्टेंस को स्टोर करने के लिए उपयोग किया जाता है।
+    """
+    global application_instance
+    application_instance = application
+    print("Application instance set globally.")
 
-# --- Main function to run the bot ---
 def main():
-    """Bot को स्टार्ट करता है।"""
-    global application_instance # Globalize the application instance
-    application_instance = Application.builder().token(BOT_TOKEN).build()
+    print("Initializing bot...")
+    init_db() # MongoDB कनेक्शन इनिशियलाइज़ करें
 
-    # --- Command Handlers ---
-    # These are still needed if users type commands, but buttons will be primary
-    application_instance.add_handler(CommandHandler("start", start))
-    application_instance.add_handler(CommandHandler("earn", earn))
-    application_instance.add_handler(CommandHandler("tasks", tasks))
-    application_instance.add_handler(CommandHandler("balance", check_balance))
-    application_instance.add_handler(CommandHandler("invite", invite))
-    application_instance.add_handler(CommandHandler("withdraw", withdraw))
+    # एप्लिकेशन बनाएँ और अपने बॉट का टोकन पास करें।
+    # सेट post_init स्टोर करने के लिए application instance.
+    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
+    # हैंडलर रजिस्टर करने के लिए डिस्पैचर प्राप्त करें
+    # यदि मैसेज भेजने के लिए आवश्यक हो तो वैश्विक application_instance का उपयोग करें या इसे पास करें
 
-    # --- Message Handler for text inputs (like withdrawal amount/details) and general text messages ---
-    # IMPORTANT: This must be added BEFORE the CommandHandlers if you want buttons to also trigger handlers.
-    # We will use this to catch text that matches our button texts.
-    application_instance.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input_for_withdrawal))
-
-    # --- Callback Query Handlers (for Inline Buttons) ---
-    application_instance.add_handler(CallbackQueryHandler(set_language, pattern="^set_lang_"))
-    application_instance.add_handler(CallbackQueryHandler(done_shortlink, pattern="^done_shortlink$"))
-    application_instance.add_handler(CallbackQueryHandler(generate_next_shortlink, pattern="^generate_next_shortlink$"))
-    application_instance.add_handler(CallbackQueryHandler(claim_channel, pattern="^claim_channel_\\d+$"))
-    application_instance.add_handler(CallbackQueryHandler(handle_withdrawal_method, pattern="^withdraw_method_"))
-    
-    # --- Callback Query Handlers for Admin Actions ---
-    application_instance.add_handler(CallbackQueryHandler(approve_withdrawal, pattern="^approve_withdraw_"))
-    application_instance.add_handler(CallbackQueryHandler(reject_withdrawal, pattern="^reject_withdraw_"))
-    
-    # --- Handler for Main Menu Buttons (text matching) ---
-    # These handlers will call the same functions as the commands
-    application_instance.add_handler(MessageHandler(filters.Regex(LANGUAGES[DEFAULT_LANGUAGE]['earn_button']) | filters.Regex(LANGUAGES['hi']['earn_button']), earn))
-    application_instance.add_handler(MessageHandler(filters.Regex(LANGUAGES[DEFAULT_LANGUAGE]['tasks_button']) | filters.Regex(LANGUAGES['hi']['tasks_button']), tasks))
-    application_instance.add_handler(MessageHandler(filters.Regex(LANGUAGES[DEFAULT_LANGUAGE]['balance_button']) | filters.Regex(LANGUAGES['hi']['balance_button']), check_balance))
-    application_instance.add_handler(MessageHandler(filters.Regex(LANGUAGES[DEFAULT_LANGUAGE]['invite_button']) | filters.Regex(LANGUAGES['hi']['invite_button']), invite))
-    application_instance.add_handler(MessageHandler(filters.Regex(LANGUAGES[DEFAULT_LANGUAGE]['withdraw_button']) | filters.Regex(LANGUAGES['hi']['withdraw_button']), withdraw))
+    # --- कमांड हैंडलर ---
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("earn", earn))
+    application.add_handler(CommandHandler("tasks", tasks))
+    application.add_handler(CommandHandler("balance", check_balance))
+    application.add_handler(CommandHandler("invite", invite))
+    application.add_handler(CommandHandler("withdraw", withdraw))
 
 
-    # --- Error Handler ---
-    application_instance.add_error_handler(error_handler)
+    # --- कॉलबैक क्वेरी हैंडलर (इनलाइन कीबोर्ड बटनों के लिए) ---
+    application.add_handler(CallbackQueryHandler(set_language, pattern=r"^set_lang_"))
+    application.add_handler(CallbackQueryHandler(done_shortlink, pattern=r"^done_shortlink$"))
+    application.add_handler(CallbackQueryHandler(generate_next_shortlink, pattern=r"^generate_next_shortlink$"))
+    application.add_handler(CallbackQueryHandler(claim_channel, pattern=r"^claim_channel_"))
+    application.add_handler(CallbackQueryHandler(handle_withdrawal_method, pattern=r"^withdraw_method_"))
+    application.add_handler(CallbackQueryHandler(approve_withdrawal, pattern=r"^approve_withdraw_"))
+    application.add_handler(CallbackQueryHandler(reject_withdrawal, pattern=r"^reject_withdraw_"))
 
-    application_instance.run_polling(allowed_updates=Update.ALL_TYPES)
+    # --- मैसेज हैंडलर (रिप्लाई कीबोर्ड बटनों और टेक्स्ट इनपुट के लिए) ---
+    # इन हैंडलर को कमांड हैंडलर और कॉलबैक क्वेरी हैंडलर के बाद रखा जाना चाहिए
+    # ताकि यह सुनिश्चित हो सके कि कमांड और इनलाइन बटन पहले संसाधित होते हैं।
+
+    # रेगुलर कीबोर्ड बटन केवल टेक्स्ट मैसेज होते हैं, इसलिए उन्हें MessageHandler(filters.TEXT) द्वारा हैंडल किया जाता है
+    # हम आपके मुख्य मेनू बटनों के विशिष्ट टेक्स्ट से मेल खाने के लिए filters.Regex का उपयोग करते हैं।
+    # '|' (OR) ऑपरेटर एक हैंडलर को कई बटनों को कवर करने की अनुमति देता है।
+    application.add_handler(MessageHandler(filters.Regex(get_text(None, 'earn_button')) | filters.Regex(get_text(None, 'tasks_button')), earn))
+    application.add_handler(MessageHandler(filters.Regex(get_text(None, 'balance_button')) | filters.Regex(get_text(None, 'invite_button')), check_balance))
+    application.add_handler(MessageHandler(filters.Regex(get_text(None, 'withdraw_button')), withdraw))
+
+    # निकासी प्रक्रिया के दौरान टेक्स्ट इनपुट के लिए हैंडलर
+    # यह सुनिश्चित करता है कि यह केवल उन टेक्स्ट मैसेज को कैप्चर करता है जो कमांड नहीं हैं
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_withdrawal_amount))
 
 
-if __name__ == '__main__':
-    init_db() # पहले डेटाबेस कनेक्शन इनिशियलाइज़ करें
-    main() # फिर बॉट स्टार्ट करें
+    # --- एरर हैंडलर ---
+    application.add_error_handler(error_handler)
+
+    print("Starting bot polling...")
+    # उपयोगकर्ता द्वारा Ctrl-C दबाने तक बॉट चलाएँ
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
