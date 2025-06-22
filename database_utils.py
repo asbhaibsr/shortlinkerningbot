@@ -5,7 +5,7 @@ from pymongo.errors import ConnectionFailure, OperationFailure
 from datetime import datetime
 from bson.objectid import ObjectId
 
-# config.py से आवश्यक कॉन्फ़िगरेशन इंपोर्ट करें
+# config.py से आवश्यक कॉन्फ़िगरेशन इंपोर्ट करें
 from config import (
     MONGO_URI_1, DB_NAME_1, MONGO_URI_2, DB_NAME_2, DEFAULT_LANGUAGE
 )
@@ -30,7 +30,7 @@ def init_db():
         client1.admin.command('ping') # कनेक्शन टेस्ट करें
         db1 = client1[DB_NAME_1]
         users_collection = db1["users"]
-        # यूज़र_आईडी पर तेज़ लुकअप के लिए यूनिक इंडेक्स सुनिश्चित करें
+        # यूज़र_आईडी पर तेज़ लुकअप के लिए यूनिक इंडेक्स सुनिश्चित करें
         users_collection.create_index("user_id", unique=True)
         print("Connected to MongoDB Instance 1 (User Data) successfully!")
 
@@ -40,8 +40,10 @@ def init_db():
         db2 = client2[DB_NAME_2]
         withdrawal_requests_collection = db2["withdrawal_requests"]
         # त्वरित लुकअप के लिए _id पर और फ़िल्टरिंग के लिए स्टेटस पर इंडेक्स सुनिश्चित करें
-        withdrawal_requests_collection.create_index("_id", unique=True)
-        withdrawal_requests_collection.create_index("status")
+        # 'unique=True' को '_id' इंडेक्स से हटाया गया है क्योंकि यह पहले से ही unique होता है।
+        # withdrawal_requests_collection.create_index("_id", unique=True) # <-- यह लाइन हटाई गई है
+        withdrawal_requests_collection.create_index("status") # <-- यह लाइन मौजूद रहनी चाहिए
+
         print("Connected to MongoDB Instance 2 (Withdrawal Data) successfully!")
 
     except ConnectionFailure as e:
@@ -54,13 +56,13 @@ def init_db():
         print(f"DB इनिशियलाइज़ेशन के दौरान एक अप्रत्याशित त्रुटि हुई: {e}")
         exit(1)
 
-# --- डेटाबेस इंटरैक्शन के लिए यूटिलिटी फ़ंक्शंस ---
+# --- डेटाबेस इंटरैक्शन के लिए यूटिलिटी फ़ंक्शंस ---
 
 def get_user_data(user_id):
     # डेटा इंस्टेंस 1 से आता है
     user_doc = users_collection.find_one({"user_id": user_id})
     if not user_doc:
-        # यदि यूज़र मौजूद नहीं है, तो डिफ़ॉल्ट मानों के साथ एक नया दस्तावेज़ डालें
+        # यदि यूज़र मौजूद नहीं है, तो डिफ़ॉल्ट मानों के साथ एक नया दस्तावेज़ डालें
         new_user = {
             "user_id": user_id,
             "balance": 0.0,
@@ -91,7 +93,7 @@ def get_user_data(user_id):
     }
 
 def update_user_data(user_id, balance_change=0, shortlinks_solved_change=0, new_last_shortlink=None, referral_count_change=0, channel_joined_change=0, add_claimed_channel_id=None, set_referred_by=None):
-    # यह इंस्टेंस 1 में यूज़र डेटा को अपडेट करता है
+    # यह इंस्टेंस 1 में यूज़र डेटा को अपडेट करता है
     update_fields = {}
     if balance_change != 0:
         update_fields["balance"] = balance_change
@@ -134,7 +136,7 @@ def record_withdrawal_request(user_id, amount_points, amount_rupees, method, det
     })
     return result.inserted_id # ObjectId लौटाएँ
 
-# --- भाषा यूटिलिटी फ़ंक्शंस ---
+# --- भाषा यूटिलिटी फ़ंक्शंस ---
 def set_user_language(user_id, lang_code):
     # भाषा अपडेट इंस्टेंस 1 में होते हैं
     users_collection.update_one({"user_id": user_id}, {"$set": {"language": lang_code}})
