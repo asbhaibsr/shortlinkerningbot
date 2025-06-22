@@ -6,6 +6,18 @@
 LANGUAGES = {
     "en": {
         "name": "English",
+        # --- BUTTON TEXTS ---
+        "earn_button": "💰 Earn Points",
+        "tasks_button": "📝 Tasks",
+        "balance_button": "💲 Balance",
+        "invite_button": "🤝 Invite",
+        "withdraw_button": "💸 Withdraw",
+        "claim_points_button": "✅ Claim Points for {channel_name}", # Added for claiming points in tasks
+        "upi_method_button": "UPI ID",
+        "bank_method_button": "Bank Account",
+        "redeem_method_button": "Redeem Code",
+        # --- END BUTTON TEXTS ---
+
         "welcome": "Hello {first_name}! I am your earning bot.\n\nYour current balance: **{balance:.2f} points.**\n"
                    "You have solved {shortlinks_solved_count} shortlinks.\n\nCommands:\n"
                    "/earn - Solve shortlinks\n/tasks - Join channels\n/balance - Check your balance\n"
@@ -29,8 +41,8 @@ LANGUAGES = {
         "channel_claimed_success": "Thank you! You have joined **{channel_name}** channel and claimed **{points_added:.2f} points**.\n"
                                    "Your new balance: **{balance:.2f}**\n\nMore tasks: /tasks",
         "referral_link_text": "Share this link to invite your friends:\n\n`{referral_link}`\n\n"
-                              "You have made **{referral_count}** referrals so far.\n"
-                              "You will get **{referral_points} points** for every 30 referrals.",
+                                "You have made **{referral_count}** referrals so far.\n"
+                                "You will get **{referral_points} points** for every 30 referrals.",
         "balance_text": "Your current balance: **{balance:.2f} points.**\n"
                         "You have solved **{shortlinks_solved_count}** shortlinks.\n"
                         "You have made **{referral_count}** referrals.\n"
@@ -62,6 +74,18 @@ LANGUAGES = {
     },
     "hi": {
         "name": "हिंदी",
+        # --- BUTTON TEXTS ---
+        "earn_button": "💰 पॉइंट्स कमाएँ",
+        "tasks_button": "📝 कार्य",
+        "balance_button": "💲 बैलेंस",
+        "invite_button": "🤝 आमंत्रित करें",
+        "withdraw_button": "💸 विथड्रॉ करें",
+        "claim_points_button": "✅ {channel_name} के लिए पॉइंट्स क्लेम करें", # Added for claiming points in tasks
+        "upi_method_button": "यूपीआई आईडी",
+        "bank_method_button": "बैंक खाता",
+        "redeem_method_button": "रिडीम कोड",
+        # --- END BUTTON TEXTS ---
+
         "welcome": "नमस्ते {first_name}! मैं आपका कमाई करने वाला बॉट हूँ।\n\nआपका मौजूदा बैलेंस: **{balance:.2f} पॉइंट्स।**\n"
                    "आपने {shortlinks_solved_count} शॉर्टलिंक सॉल्व किए हैं।\n\nकमांड्स:\n"
                    "/earn - शॉर्टलिंक सॉल्व करें\n/tasks - चैनल जॉइन करें\n/balance - अपना बैलेंस देखें\n"
@@ -85,8 +109,8 @@ LANGUAGES = {
         "channel_claimed_success": "शुक्रिया! आपने **{channel_name}** चैनल जॉइन कर लिया और **{points_added:.2f} पॉइंट्स** क्लेम कर लिए।\n"
                                    "आपका नया बैलेंस: **{balance:.2f}**\n\nअधिक कार्य: /tasks",
         "referral_link_text": "अपने दोस्तों को इन्वाइट करने के लिए यह लिंक शेयर करें:\n\n`{referral_link}`\n\n"
-                              "आपने अब तक **{referral_count}** रेफ़रल किए हैं।\n"
-                              "हर 30 रेफ़रल पर आपको **{referral_points} पॉइंट्स** मिलेंगे।",
+                                "आपने अब तक **{referral_count}** रेफ़रल किए हैं।\n"
+                                "हर 30 रेफ़रल पर आपको **{referral_points} पॉइंट्स** मिलेंगे।",
         "balance_text": "आपका मौजूदा बैलेंस: **{balance:.2f} पॉइंट्स।**\n"
                         "आपने अब तक **{shortlinks_solved_count}** शॉर्टलिंक सॉल्व किए हैं।\n"
                         "आपने अब तक **{referral_count}** रेफ़रल किए हैं।\n"
