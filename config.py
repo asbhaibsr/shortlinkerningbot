@@ -1,4 +1,5 @@
 # config.py
+import os
 
 # --- Bot Token ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN_HERE") # <-- यह लाइन ऐसी होनी चाहिए
@@ -31,9 +32,9 @@ MIN_WITHDRAWAL_POINTS = 40    # विथड्रॉल के लिए न्
 # --- Channels to Join (एडमिन इसे कंट्रोल कर सकता है) ---
 # अपनी वास्तविक चैनल लिंक से बदलें
 CHANNELS_TO_JOIN = [
-    {"name": "Movie Channel", "link": "https://t.me/your_movie_channel"},
-    {"name": "Main Channel", "link": "https://t.me/your_main_channel"},
-    {"name": "Another Channel", "link": "https://t.me/another_channel"},
+    {"name": "Movie Channel", "link": "https://t.me/IstreamX"},
+    {"name": "Main Channel", "link": "https://t.me/asbhai_bsr"},
+    {"name": "Another Channel", "link": "https://t.me/aspremiumapps"},
 ]
 
 DEFAULT_LANGUAGE = "en" # डिफ़ॉल्ट भाषा
