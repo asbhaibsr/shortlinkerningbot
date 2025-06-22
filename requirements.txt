@@ -1,0 +1,4 @@
+python-telegram-bot==21.1
+pymongo==4.7.3
+requests==2.32.3
+dnspython==2.6.1 # pymongo के कुछ वर्ज़न के लिए आवश्यक हो सकता है
