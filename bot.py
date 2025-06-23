@@ -19,10 +19,8 @@ from database_utils import (
     set_user_language, withdrawal_requests_collection, get_user_language
 )
 
-# --- Global variable for the application instance (to access bot methods) ---
 application_instance = None
 
-# --- Helper function to create main menu keyboard ---
 def main_menu_keyboard(user_id):
     """मुख्य मेनू के लिए ReplyKeyboardMarkup बनाता है।"""
     keyboard = [
@@ -42,18 +40,15 @@ def main_menu_keyboard(user_id):
     # one_time_keyboard=False: कीबोर्ड को हर बार छिपाने के बजाय हमेशा दिखाता है।
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
-# --- Helper function to fetch a shortlink from API ---
 async def fetch_new_shortlink_from_api():
     try:
         random_long_url = f"https://example.com/page/{random.randint(1000, 9999)}?user={random.randint(100,999)}"
         
-        # --- यहाँ परिवर्तन किया गया है ---
         # API कुंजी को URL पैरामीटर के रूप में शामिल करें
         api_url_with_key = f"{SHORTLINK_API_URL}?api={SHORTLINK_API_KEY}&url={random_long_url}"
         
         # अब headers की आवश्यकता नहीं है क्योंकि API कुंजी सीधे URL में है
         response = requests.get(api_url_with_key) # GET अनुरोध का उपयोग करें क्योंकि PHP उदाहरण भी GET का उपयोग कर रहा है
-        # --- परिवर्तन यहाँ समाप्त होता है ---
 
         response.raise_for_status() # यह 4XX/5XX प्रतिक्रियाओं के लिए HTTPError को बढ़ाएगा
         data = response.json()
@@ -79,7 +74,6 @@ async def fetch_new_shortlink_from_api():
         print(f"An unexpected error occurred in fetch_new_shortlink_from_api: {e}")
         return None
 
-# --- Command Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     user_data = get_user_data(user_id)
@@ -141,7 +135,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu_keyboard(user_id) # हमेशा वेलकम के बाद मुख्य मेनू कीबोर्ड दिखाएं
     )
 
-# --- Language Selection Callback Handler ---
 async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -166,7 +159,6 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu_keyboard(user_id) # भाषा चयन के बाद मुख्य मेनू कीबोर्ड दिखाएं
     )
 
-# --- Shortlink Earning Logic ---
 async def earn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # यह निर्धारित करें कि अपडेट एक मैसेज से है या एक कॉलबैक क्वेरी से।
     if update.message:
@@ -229,7 +221,6 @@ async def generate_next_shortlink(update: Update, context: ContextTypes.DEFAULT_
     await earn(update.callback_query, context)
 
 
-# --- Channel Joining Tasks ---
 async def tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # यह निर्धारित करें कि अपडेट एक मैसेज से है या एक कॉलबैक क्वेरी से।
     if update.message:
@@ -313,7 +304,6 @@ async def claim_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await tasks(update, context) # सही send_func का उपयोग सुनिश्चित करने के लिए मूल अपडेट ऑब्जेक्ट पास करें
 
 
-# --- Referral System ---
 async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # यह हैंडलर एक कमांड या कीबोर्ड बटन द्वारा कॉल किया जा सकता है।
     if update.message:
@@ -338,7 +328,6 @@ async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu_keyboard(user_id) # मुख्य मेनू कीबोर्ड दिखाएं
     )
 
-# --- Check Balance Command ---
 async def check_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # यह हैंडलर एक कमांड या कीबोर्ड बटन द्वारा कॉल किया जा सकता है।
     if update.message:
@@ -360,7 +349,6 @@ async def check_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu_keyboard(user_id) # मुख्य मेनू कीबोर्ड दिखाएं
     )
 
-# --- Withdrawal System ---
 async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # यह हैंडलर एक कमांड या कीबोर्ड बटन द्वारा कॉल किया जा सकता है।
     if update.message:
@@ -525,7 +513,6 @@ async def handle_withdrawal_details(update: Update, context: ContextTypes.DEFAUL
         reply_markup=main_menu_keyboard(user_id) # सफल निकासी के बाद मुख्य मेनू कीबोर्ड दिखाएं
     )
 
-    # --- एडमिन चैनल को बटनों के साथ सूचना भेजें ---
     try:
         user_info = await context.bot.get_chat(user_id)
         user_name = user_info.first_name
@@ -580,7 +567,6 @@ async def handle_withdrawal_details(update: Update, context: ContextTypes.DEFAUL
     context.user_data.pop('withdraw_amount_rupees', None)
     context.user_data.pop('withdraw_method', None)
 
-# --- Callback Handlers for Admin Actions ---
 async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer("विथड्रॉल मंज़ूर किया जा रहा है...")
@@ -695,7 +681,6 @@ async def reject_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error sending rejection notification to user {user_id_to_notify}: {e}")
 
-# --- Generic Error Handler ---
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"Error occurred: {context.error}")
     # डीबगिंग के लिए पूरा ट्रेसबैक लॉग करें
@@ -712,9 +697,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # यदि reply_text किसी कारण से विफल हो जाता है तो फ़ॉलबैक करें
             await context.bot.send_message(chat_id=user_id, text="An unexpected error occurred. Please try /start.")
 
----
 ### Main function where handlers are added
----
 
 async def post_init(application: Application):
     """
@@ -736,7 +719,6 @@ def main():
     # हैंडलर रजिस्टर करने के लिए डिस्पैचर प्राप्त करें
     # यदि मैसेज भेजने के लिए आवश्यक हो तो वैश्विक application_instance का उपयोग करें या इसे पास करें
 
-    # --- कमांड हैंडलर ---
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("earn", earn))
     application.add_handler(CommandHandler("tasks", tasks))
@@ -745,7 +727,6 @@ def main():
     application.add_handler(CommandHandler("withdraw", withdraw))
 
 
-    # --- कॉलबैक क्वेरी हैंडलर (इनलाइन कीबोर्ड बटनों के लिए) ---
     application.add_handler(CallbackQueryHandler(set_language, pattern=r"^set_lang_"))
     application.add_handler(CallbackQueryHandler(done_shortlink, pattern=r"^done_shortlink$"))
     application.add_handler(CallbackQueryHandler(generate_next_shortlink, pattern=r"^generate_next_shortlink$"))
@@ -754,7 +735,6 @@ def main():
     application.add_handler(CallbackQueryHandler(approve_withdrawal, pattern=r"^approve_withdraw_"))
     application.add_handler(CallbackQueryHandler(reject_withdrawal, pattern=r"^reject_withdraw_"))
 
-    # --- मैसेज हैंडलर (रिप्लाई कीबोर्ड बटनों और टेक्स्ट इनपुट के लिए) ---
     # इन हैंडलर को कमांड हैंडलर और कॉलबैक क्वेरी हैंडलर के बाद रखा जाना चाहिए
     # ताकि यह सुनिश्चित हो सके कि कमांड और इनलाइन बटन पहले संसाधित होते हैं।
 
@@ -770,7 +750,6 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_withdrawal_amount))
 
 
-    # --- एरर हैंडलर ---
     application.add_error_handler(error_handler)
 
     print("Starting bot polling...")
