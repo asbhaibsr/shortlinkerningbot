@@ -669,9 +669,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Fallback if reply_text fails for some reason
             await context.bot.send_message(chat_id=user_id, text="An unexpected error occurred. Please try /start.")
 
----
 ### Main function where handlers are added
----
 
 async def post_init(application: Application):
     """
