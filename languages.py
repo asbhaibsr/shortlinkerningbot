@@ -1,172 +1,149 @@
 # languages.py
 
-# --- LANGUAGES Dictionary (सभी बॉट टेक्स्ट अलग-अलग भाषाओं में) ---
-# यह डिक्शनरी बॉट के सभी संदेशों का अनुवाद रखती है।
-# सुनिश्चित करें कि सभी कुंजियों (keys) का अनुवाद सभी भाषाओं में मौजूद हो।
+DEFAULT_LANGUAGE = "hi" # बॉट के लिए डिफ़ॉल्ट भाषा
+
 LANGUAGES = {
     "en": {
-        "name": "English",
-        # --- BUTTON TEXTS ---
-        "earn_button": "💰 Earn Points",
-        "tasks_button": "📝 Tasks",
-        "balance_button": "💲 Balance",
-        "invite_button": "🤝 Invite",
-        "withdraw_button": "💸 Withdraw",
-        "claim_points_button": "✅ Claim Points for {channel_name}", # Added for claiming points in tasks
-        "upi_method_button": "UPI ID",
-        "bank_method_button": "Bank Account",
-        "redeem_method_button": "Redeem Code",
-        # --- END BUTTON TEXTS ---
-
-        "welcome": "Hello {first_name}! I am your earning bot.\n\nYour current balance: **{balance:.2f} points.**\n"
-                   "You have solved {shortlinks_solved_count} shortlinks.\n\nCommands:\n"
-                   "/earn - Solve shortlinks\n/tasks - Join channels\n/balance - Check your balance\n"
-                   "/invite - Invite your friends\n/withdraw - Withdraw money",
-        "language_choice": "Please choose your preferred language:",
-        "invalid_referrer": "Welcome! Invalid referrer ID or already referred.",
-        "self_referral": "Welcome! You cannot refer yourself.",
-        "referrer_joined": "🎉 You got a new referral! User {user_id} joined via your link.",
-        "shortlink_unavailable": "Could not generate a new shortlink. Please try again later.",
-        "shortlink_given": "Here is your next shortlink:\n\n{shortlink}\n\n"
-                           "After solving it, click the button below:",
-        "shortlink_button": "✅ I have completed the Shortlink",
-        "no_shortlink_started": "You haven't started solving any shortlink. Start with the /earn command.",
-        "shortlink_completed": "Thank you! You have solved a shortlink. You earned **{points:.2f} point**.\n"
-                               "Total solved shortlinks: **{solved_count}**.\nYour current balance: **{balance:.2f} points.**",
-        "next_shortlink_button": "➡️ Generate Next Shortlink",
-        "no_tasks_available": "No channels available to join right now.",
-        "join_channels_prompt": "Join the channels below and then claim points:",
-        "claimed_already": "You have already claimed points for this channel.",
-        "invalid_channel": "Invalid channel.",
-        "channel_claimed_success": "Thank you! You have joined **{channel_name}** channel and claimed **{points_added:.2f} points**.\n"
-                                   "Your new balance: **{balance:.2f}**\n\nMore tasks: /tasks",
-        "referral_link_text": "Share this link to invite your friends:\n\n`{referral_link}`\n\n"
-                                "You have made **{referral_count}** referrals so far.\n"
-                                "You will get **{referral_points} points** for every 30 referrals.",
-        "balance_text": "Your current balance: **{balance:.2f} points.**\n"
-                        "You have solved **{shortlinks_solved_count}** shortlinks.\n"
-                        "You have made **{referral_count}** referrals.\n"
-                        "You have joined **{channel_joined_count}** channels.",
-        "min_withdraw_balance": "Your current balance is **{balance:.2f}** points. Minimum withdrawal amount is **{min_points} points** (which is equal to **{min_rupees:.2f} Rs.**).",
-        "min_shortlinks_for_withdraw": "You need to solve at least **{min_shortlinks}** shortlinks to request a withdrawal. You have solved **{solved_count}**.",
-        "withdraw_prompt_amount": "Your current balance is **{balance:.2f} points**. Minimum withdrawal **{min_points} points**.\n"
-                                  "**1 Point = {rate:.2f} Rs.**\n"
-                                  "How many points do you want to withdraw? (Enter only the number, minimum {min_points} points)",
-        "invalid_amount": "Invalid amount. Please enter a valid number.",
-        "not_enough_points": "You don't have enough points. Your current balance: **{balance:.2f}** points.",
-        "withdraw_confirm_method": "You want to withdraw **{points:.2f} points** (which is equal to **{rupees:.2f} Rs.**).\n"
-                                   "Which method do you want to withdraw with?",
-        "upi_prompt": "Please enter your **UPI ID**:",
-        "bank_prompt": "Please enter your **Bank Account Number, IFSC Code, and Account Holder Name** in one message:",
-        "redeem_prompt": "Please enter your **email address** where you want to receive the redeem code:",
-        "invalid_method": "Invalid method selected.",
-        "withdrawal_error": "An error occurred during the withdrawal process. Please try /withdraw again.",
-        "withdrawal_success": "Your withdrawal request has been submitted successfully.\n"
-                              "Requested Points: **{points:.2f}**\n"
-                              "Estimated Rupees: **{rupees:.2f} Rs.**\n"
-                              "Method: **{method}**\n"
-                              "Details: `{details}`\n\n"
-                              "Your new balance: **{balance:.2f} points.**\n"
-                              "Our team will process your request soon.",
-        "action_not_valid": "This action is not currently valid.",
-        "generic_error": "An error occurred. Please try again or /start.",
-        "command_usage": "Please use commands. Start with /start or type /help."
+        "name": "English 🇬🇧",
+        "language_choice": "Please choose your language:",
+        "force_subscribe_text": "🚨 *Important!* 🚨\n\nTo use this bot, you must first join our channel:\n👉 @{channel_username}\n\nAfter joining, click '✅ I have joined!'",
+        "join_channel_button": "Join Channel",
+        "joined_check_button": "✅ I have joined!",
+        "not_joined_error": "❌ It seems you haven't joined the channel yet or I couldn't verify. Please join @{channel_username} and click '✅ I have joined!' again.",
+        "welcome": "🎉 *Welcome, {first_name}!* 🎉\n\nYour current balance is: *{balance:.2f} Points*\n\n_Choose an option from the menu below:_ 👇",
+        "earn_button": "🔗 Earn Points",
+        "profile_button": "👤 My Profile",
+        "invite_button": "👨‍👩‍👧‍👦 Invite & Earn",
+        "withdraw_button": "💳 Withdraw",
+        "help_button": "❓ Help",
+        "earn_options_prompt": "Choose how you want to earn points:",
+        "solve_shortlinks_button": "🔗 Solve Shortlinks",
+        "join_channels_button": "➕ Join Channels/Groups",
+        "shortlink_instructions": "📖 *How to Earn with Shortlinks:*\n\n1. Click the shortlink provided below.\n2. Complete all steps (view ads, solve captcha, etc.) on the website.\n3. After successful completion, click '✅ I Completed It!' here.\n\nYou will receive *{points_per_shortlink:.2f} Points* for each completed shortlink.",
+        "shortlink_unavailable": "😔 Sorry, I couldn't fetch a shortlink right now. Please try again later.",
+        "shortlink_given": "🚀 Here's your shortlink!\n👉 {shortlink}\n\n*Click the 'Done' button after completing the shortlink.*",
+        "shortlink_completed_button": "✅ I Completed It!",
+        "no_shortlink_started": "🤔 You haven't started any shortlink task yet. Please click 'Solve Shortlinks' first.",
+        "shortlink_completed": "✨ Congratulations! You earned {points:.2f} points!\n\nYour new balance: *{balance:.2f} Points*\nTotal shortlinks solved: *{solved_count}*",
+        "next_shortlink_button": "➡️ Next Shortlink",
+        "channels_to_join_prompt": "Here are channels/groups you can join to earn points. Click 'Joined & Claim' after joining each one.",
+        "channel_already_claimed": "❌ You have already claimed points for joining *{channel_username}*.",
+        "channel_not_joined": "😔 You must join *{channel_username}* first to claim points.",
+        "channel_claim_success": "✅ You earned {points:.2f} points for joining *{channel_username}*!\n\nYour new balance: *{balance:.2f} Points*",
+        "no_more_channels": "🎉 You have joined all available channels/groups and claimed your points!",
+        "joined_claim_button": "✅ Joined & Claim",
+        "profile_text": "👤 *Your Profile:*\n\nName: *{first_name}*\nBalance: *{balance:.2f} Points*\nShortlinks Solved: *{shortlinks_solved_count}*\nTotal Referrals: *{referral_count}*\n\n_Your profile picture is shown above._",
+        "min_withdraw_balance": "⛔ *Insufficient Balance!*\n\nYou need at least *{min_points:.2f} Points* ({min_rupees:.2f} Rs) to withdraw.\nYour current balance: *{balance:.2f} Points*.\n\n_Earn more points to reach the minimum._",
+        "withdraw_prompt_amount": "💰 *Enter Withdrawal Amount*\n\nYour current balance: *{balance:.2f} Points*\nMinimum withdrawal: *{min_points:.2f} Points* ({min_rupees:.2f} Rs).\n\n_Enter the amount in points you wish to withdraw:_",
+        "invalid_amount": "❌ Invalid amount. Please enter a valid number.",
+        "not_enough_points": "🚫 You don't have enough points for this withdrawal. Your balance: *{balance:.2f} Points*.",
+        "withdraw_confirm_method": "💲 You want to withdraw *{points:.2f} Points* (approx. *{rupees:.2f} Rs*).\n\nPlease choose your withdrawal method:",
+        "upi_method_button": "💳 UPI",
+        "qr_method_button": "📱 QR Code",
+        "bank_method_button": "🏦 Bank Transfer",
+        "redeem_method_button": "🎁 Redeem Code (Google Play)",
+        "invalid_method": "❌ Invalid withdrawal method selected.",
+        "upi_prompt": "✍️ Please send your **UPI ID** (e.g., `yourname@bank`) to proceed with the withdrawal.",
+        "qr_prompt": "✍️ Please send your **QR Code image** to proceed with the withdrawal.",
+        "bank_prompt": "✍️ Please send your **Bank Account Details** (Account Holder Name, Account Number, IFSC Code, Bank Name) to proceed with the withdrawal.",
+        "redeem_prompt": "✍️ Please send the **Google Play Redeem Code value** you want (e.g., `100 Rs`, `250 Rs`).",
+        "withdrawal_success": "✅ *Withdrawal Request Submitted!* ✅\n\nAmount: *{points:.2f} Points* (approx. *{rupees:.2f} Rs*)\nMethod: *{method}*\nDetails: *{details}*\n\nYour remaining balance: *{balance:.2f} Points*.\n_Your request is being processed. Please wait 24-48 hours._",
+        "withdrawal_error": "🚫 Something went wrong with your withdrawal. Please try again.",
+        "command_usage": "⚠️ Please use the buttons to navigate.",
+        "referrer_joined": "🎉 *New Referral!* 🎉\n\nYour referral `@{user_username}` has joined the bot!\n\n_You earned {referral_points_per_referral:.2f} points._",
+        "invalid_referrer": "🚫 Invalid referral link or you've already been referred.",
+        "self_referral": "😅 You can't refer yourself!",
+        "referral_link_text": "👨‍👩‍👧‍👦 *Invite your friends and earn!* 👨‍👩‍👧‍👦\n\nShare this link:\n`{referral_link}`\n\nFor each friend who joins through your link, you'll earn *{referral_points_per_referral:.2f} Points*!\n\nYour total referrals: *{referral_count}*",
+        "generic_error": "😔 An unexpected error occurred. Please try again later or type /start to go to the main menu.",
+        "action_not_valid": "⛔ That action is not valid right now. Please use the menu buttons.",
+        "approve_button": "✅ Approve",
+        "reject_button": "❌ Reject",
+        "back_to_menu": "🏠 Back to Main Menu",
+        "help_text": "❓ *Help & Information*\n\nWelcome to our earning bot! Here's how it works:\n\n*1. Earn Points:*\n   - *Solve Shortlinks:* Click 'Earn Points' -> 'Solve Shortlinks'. Follow the instructions, complete the shortlink, and click 'I Completed It!' to earn points.\n   - *Join Channels/Groups:* Click 'Earn Points' -> 'Join Channels/Groups'. Join the listed channels/groups and claim your points once.\n\n*2. Invite & Earn:*\n   - Click 'Invite & Earn' to get your unique referral link. Share it with friends. You earn points for every successful referral!\n\n*3. My Profile:*\n   - Click 'My Profile' to see your current balance, total shortlinks solved, and referrals. You can also start a withdrawal from here.\n\n*4. Withdraw:*\n   - Click 'Withdraw'. You need a minimum of {min_points:.2f} Points ({min_rupees:.2f} Rs) to withdraw.\n   - Enter the amount of points you want to withdraw. The bot will automatically show you the equivalent amount in Rupees.\n   - Choose your preferred method: UPI, QR Code, Bank Transfer (1 point = {upi_qr_bank_rate:.2f} Rs) or Google Play Redeem Code (1 point = {redeem_rate:.2f} Rs).\n   - Provide the requested details.\n   - Your request will be sent to the admin for processing.\n\n_If you have any further questions, please contact the bot admin._",
     },
     "hi": {
-        "name": "हिंदी",
-        # --- BUTTON TEXTS ---
-        "earn_button": "💰 पॉइंट्स कमाएँ",
-        "tasks_button": "📝 कार्य",
-        "balance_button": "💲 बैलेंस",
-        "invite_button": "🤝 आमंत्रित करें",
-        "withdraw_button": "💸 विथड्रॉ करें",
-        "claim_points_button": "✅ {channel_name} के लिए पॉइंट्स क्लेम करें", # Added for claiming points in tasks
-        "upi_method_button": "यूपीआई आईडी",
-        "bank_method_button": "बैंक खाता",
-        "redeem_method_button": "रिडीम कोड",
-        # --- END BUTTON TEXTS ---
-
-        "welcome": "नमस्ते {first_name}! मैं आपका कमाई करने वाला बॉट हूँ।\n\nआपका मौजूदा बैलेंस: **{balance:.2f} पॉइंट्स।**\n"
-                   "आपने {shortlinks_solved_count} शॉर्टलिंक सॉल्व किए हैं।\n\nकमांड्स:\n"
-                   "/earn - शॉर्टलिंक सॉल्व करें\n/tasks - चैनल जॉइन करें\n/balance - अपना बैलेंस देखें\n"
-                   "/invite - अपने दोस्तों को इन्वाइट करें\n/withdraw - पैसे निकालें",
-        "language_choice": "कृपया अपनी पसंदीदा भाषा चुनें:",
-        "invalid_referrer": "स्वागत है! अमान्य रेफ़रर आईडी या पहले ही रेफ़र किया जा चुका है।",
-        "self_referral": "स्वागत है! आप खुद को रेफ़र नहीं कर सकते।",
-        "referrer_joined": "🎉 आपको नया रेफ़रल मिला! यूज़र {user_id} आपके लिंक से जुड़ा।",
-        "shortlink_unavailable": "नया शॉर्टलिंक जनरेट नहीं हो पाया। कृपया बाद में फिर से कोशिश करें।",
-        "shortlink_given": "यह रहा आपका अगला शॉर्टलिंक:\n\n{shortlink}\n\n"
-                           "इसे सॉल्व करने के बाद, नीचे दिए गए बटन पर क्लिक करें:",
-        "shortlink_button": "✅ मैंने शॉर्टलिंक पूरा कर लिया",
-        "no_shortlink_started": "आपने कोई शॉर्टलिंक सॉल्व करने के लिए शुरू नहीं किया है। /earn कमांड से शुरू करें।",
-        "shortlink_completed": "शुक्रिया! आपने एक शॉर्टलिंक सॉल्व कर लिया। आपको **{points:.2f} पॉइंट** मिला है।\n"
-                               "कुल सॉल्व किए गए शॉर्टलिंक: **{solved_count}**।\nआपका मौजूदा बैलेंस: **{balance:.2f} पॉइंट्स।**",
-        "next_shortlink_button": "➡️ अगला शॉर्टलिंक जनरेट करें",
-        "no_tasks_available": "अभी जॉइन करने के लिए कोई चैनल उपलब्ध नहीं हैं।",
-        "join_channels_prompt": "नीचे दिए गए चैनलों को जॉइन करें और फिर पॉइंट्स क्लेम करें:",
-        "claimed_already": "आप पहले ही इस चैनल के पॉइंट्स क्लेम कर चुके हैं।",
-        "invalid_channel": "अमान्य चैनल।",
-        "channel_claimed_success": "शुक्रिया! आपने **{channel_name}** चैनल जॉइन कर लिया और **{points_added:.2f} पॉइंट्स** क्लेम कर लिए।\n"
-                                   "आपका नया बैलेंस: **{balance:.2f}**\n\nअधिक कार्य: /tasks",
-        "referral_link_text": "अपने दोस्तों को इन्वाइट करने के लिए यह लिंक शेयर करें:\n\n`{referral_link}`\n\n"
-                                "आपने अब तक **{referral_count}** रेफ़रल किए हैं।\n"
-                                "हर 30 रेफ़रल पर आपको **{referral_points} पॉइंट्स** मिलेंगे।",
-        "balance_text": "आपका मौजूदा बैलेंस: **{balance:.2f} पॉइंट्स।**\n"
-                        "आपने अब तक **{shortlinks_solved_count}** शॉर्टलिंक सॉल्व किए हैं।\n"
-                        "आपने अब तक **{referral_count}** रेफ़रल किए हैं।\n"
-                        "आपने अब तक **{channel_joined_count}** चैनल जॉइन किए हैं।",
-        "min_withdraw_balance": "आपका मौजूदा बैलेंस **{balance:.2f}** पॉइंट्स है। न्यूनतम विड्रॉल राशि **{min_points} पॉइंट्स** है (जो कि **{min_rupees:.2f} रुपये** के बराबर है)।",
-        "min_shortlinks_for_withdraw": "आपको विड्रॉल रिक्वेस्ट करने के लिए कम से कम **{min_shortlinks}** शॉर्टलिंक सॉल्व करने होंगे। आपने अभी **{solved_count}** सॉल्व किए हैं।",
-        "withdraw_prompt_amount": "आपका मौजूदा बैलेंस **{balance:.2f} पॉइंट्स** है। न्यूनतम विड्रॉल **{min_points} पॉइंट्स** है।\n"
-                                  "**1 पॉइंट = {rate:.2f} रुपये।**\n"
-                                  "कितने पॉइंट निकालना चाहते हैं? (सिर्फ़ संख्या लिखें, न्यूनतम {min_points} पॉइंट)",
-        "invalid_amount": "अमान्य राशि। कृपया सही संख्या दर्ज करें।",
-        "not_enough_points": "आपके पास इतने पॉइंट्स नहीं हैं। आपका मौजूदा बैलेंस: **{balance:.2f}** पॉइंट्स।",
-        "withdraw_confirm_method": "आप **{points:.2f} पॉइंट्स** (जो कि **{rupees:.2f} रुपये** के बराबर हैं) निकालना चाहते हैं।\n"
-                                   "किस विधि से पैसे निकालना चाहते हैं?",
-        "upi_prompt": "कृपया अपनी **UPI ID** दर्ज करें:",
-        "bank_prompt": "कृपया अपना **बैंक खाता नंबर, IFSC कोड, और खाताधारक का नाम** एक ही संदेश में दर्ज करें:",
-        "redeem_prompt": "कृपया अपना **ईमेल पता** दर्ज करें जहाँ आप रिडीम कोड प्राप्त करना चाहते हैं:",
-        "invalid_method": "अमान्य विधि चुनी गई।",
-        "withdrawal_error": "विड्रॉल प्रक्रिया में कुछ त्रुटि हो गई। कृपया दोबारा /withdraw करें।",
-        "withdrawal_success": "आपकी विड्रॉल रिक्वेस्ट सफलतापूर्वक सबमिट हो गई है।\n"
-                              "अनुरोधित पॉइंट्स: **{points:.2f}**\n"
-                              "अनुमानित रुपये: **{rupees:.2f} रुपये।**\n"
-                              "विधि: **{method}**\n"
-                              "विवरण: `{details}`\n\n"
-                              "आपका नया बैलेंस: **{balance:.2f} पॉइंट्स।**\n"
-                              "हमारी टीम आपकी रिक्वेस्ट को जल्द ही प्रोसेस करेगी।",
-        "action_not_valid": "यह कार्रवाई अभी मान्य नहीं है।",
-        "generic_error": "कुछ त्रुटि हो गई है। कृपया दोबारा कोशिश करें या /start करें।",
-        "command_usage": "कृपया कमांड्स का उपयोग करें। /start से शुरू करें या /help टाइप करें।"
+        "name": "हिन्दी 🇮🇳",
+        "language_choice": "कृपया अपनी भाषा चुनें:",
+        "force_subscribe_text": "🚨 *महत्वपूर्ण!* 🚨\n\nइस बॉट का उपयोग करने के लिए, आपको पहले हमारा चैनल जॉइन करना होगा:\n👉 @{channel_username}\n\nजॉइन करने के बाद, '✅ मैंने जॉइन कर लिया!' पर क्लिक करें।",
+        "join_channel_button": "चैनल जॉइन करें",
+        "joined_check_button": "✅ मैंने जॉइन कर लिया!",
+        "not_joined_error": "❌ ऐसा लगता है कि आपने अभी तक चैनल जॉइन नहीं किया है या मैं सत्यापित नहीं कर सका। कृपया @{channel_username} जॉइन करें और '✅ मैंने जॉइन कर लिया!' पर फिर से क्लिक करें।",
+        "welcome": "🎉 *स्वागत है, {first_name}!* 🎉\n\nआपका वर्तमान बैलेंस है: *{balance:.2f} पॉइंट्स*\n\n_नीचे दिए गए मेनू से एक विकल्प चुनें:_ 👇",
+        "earn_button": "🔗 पॉइंट्स कमाएँ",
+        "profile_button": "👤 मेरी प्रोफ़ाइल",
+        "invite_button": "👨‍👩‍👧‍👦 इनवाइट करें और कमाएँ",
+        "withdraw_button": "💳 विथड्रॉ करें",
+        "help_button": "❓ सहायता",
+        "earn_options_prompt": "पॉइंट्स कमाने के लिए एक विकल्प चुनें:",
+        "solve_shortlinks_button": "🔗 शॉर्टलिंक हल करें",
+        "join_channels_button": "➕ चैनल/ग्रुप जॉइन करें",
+        "shortlink_instructions": "📖 *शॉर्टलिंक से कमाई कैसे करें:*\n\n1. नीचे दिए गए शॉर्टलिंक पर क्लिक करें।\n2. वेबसाइट पर सभी चरणों (विज्ञापन देखें, कैप्चा हल करें आदि) को पूरा करें।\n3. सफलतापूर्वक पूरा करने के बाद, यहां '✅ मैंने पूरा कर लिया!' पर क्लिक करें।\n\nप्रत्येक पूर्ण शॉर्टलिंक के लिए आपको *{points_per_shortlink:.2f} पॉइंट्स* मिलेंगे।",
+        "shortlink_unavailable": "😔 क्षमा करें, अभी शॉर्टलिंक नहीं मिल रहा है। कृपया बाद में पुनः प्रयास करें।",
+        "shortlink_given": "🚀 यह रहा आपका शॉर्टलिंक!\n👉 {shortlink}\n\n*_शॉर्टलिंक पूरा करने के बाद 'मैंने पूरा कर लिया!' बटन पर क्लिक करें।_*",
+        "shortlink_completed_button": "✅ मैंने पूरा कर लिया!",
+        "no_shortlink_started": "🤔 आपने अभी तक कोई शॉर्टलिंक कार्य शुरू नहीं किया है। कृपया पहले 'शॉर्टलिंक हल करें' पर क्लिक करें।",
+        "shortlink_completed": "✨ बधाई हो! आपने {points:.2f} पॉइंट्स कमाए!\n\nआपका नया बैलेंस: *{balance:.2f} पॉइंट्स*\nकुल हल किए गए शॉर्टलिंक्स: *{solved_count}*",
+        "next_shortlink_button": "➡️ अगला शॉर्टलिंक",
+        "channels_to_join_prompt": "यहां वे चैनल/ग्रुप दिए गए हैं जिन्हें आप पॉइंट्स कमाने के लिए जॉइन कर सकते हैं। प्रत्येक को जॉइन करने के बाद 'जॉइन किया और क्लेम करें' पर क्लिक करें।",
+        "channel_already_claimed": "❌ आपने *{channel_username}* जॉइन करने के लिए पहले ही पॉइंट्स क्लेम कर लिए हैं।",
+        "channel_not_joined": "😔 पॉइंट्स क्लेम करने के लिए आपको पहले *{channel_username}* जॉइन करना होगा।",
+        "channel_claim_success": "✅ *{channel_username}* जॉइन करने के लिए आपने {points:.2f} पॉइंट्स कमाए!\n\nआपका नया बैलेंस: *{balance:.2f} पॉइंट्स*",
+        "no_more_channels": "🎉 आपने सभी उपलब्ध चैनलों/ग्रुपों को जॉइन करके अपने पॉइंट्स क्लेम कर लिए हैं!",
+        "joined_claim_button": "✅ जॉइन किया और क्लेम करें",
+        "profile_text": "👤 *आपकी प्रोफ़ाइल:*\n\nनाम: *{first_name}*\nबैलेंस: *{balance:.2f} पॉइंट्स*\nहल किए गए शॉर्टलिंक्स: *{shortlinks_solved_count}*\nकुल रेफरल: *{referral_count}*\n\n_आपकी प्रोफ़ाइल पिक्चर ऊपर दिखाई गई है।_",
+        "min_withdraw_balance": "⛔ *अपर्याप्त बैलेंस!* \n\nविथड्रॉ करने के लिए आपको कम से कम *{min_points:.2f} पॉइंट्स* ({min_rupees:.2f} रुपये) चाहिए।\nआपका वर्तमान बैलेंस: *{balance:.2f} पॉइंट्स*।\n\n_न्यूनतम तक पहुँचने के लिए और पॉइंट्स कमाएँ।_",
+        "withdraw_prompt_amount": "💰 *विथड्रॉल राशि दर्ज करें*\n\nआपका वर्तमान बैलेंस: *{balance:.2f} पॉइंट्स*\nन्यूनतम विथड्रॉल: *{min_points:.2f} पॉइंट्स* ({min_rupees:.2f} रुपये)।\n\n_जितने पॉइंट्स आप विथड्रॉ करना चाहते हैं, वह राशि दर्ज करें:_",
+        "invalid_amount": "❌ अमान्य राशि। कृपया एक वैध संख्या दर्ज करें।",
+        "not_enough_points": "🚫 आपके पास इस विथड्रॉल के लिए पर्याप्त पॉइंट्स नहीं हैं। आपका बैलेंस: *{balance:.2f} पॉइंट्स*।",
+        "withdraw_confirm_method": "💲 आप *{points:.2f} पॉइंट्स* (लगभग *{rupees:.2f} रुपये*) विथड्रॉ करना चाहते हैं।\n\nकृपया अपनी विथड्रॉल विधि चुनें:",
+        "upi_method_button": "💳 यूपीआई (UPI)",
+        "qr_method_button": "📱 क्यूआर कोड (QR Code)",
+        "bank_method_button": "🏦 बैंक ट्रांसफर",
+        "redeem_method_button": "🎁 रिडीम कोड (Google Play)",
+        "invalid_method": "❌ अमान्य विथड्रॉल विधि चुनी गई।",
+        "upi_prompt": "✍️ विथड्रॉल के साथ आगे बढ़ने के लिए कृपया अपनी **यूपीआई आईडी** (उदाहरण: `आपकानाम@बैंक`) भेजें।",
+        "qr_prompt": "✍️ विथड्रॉल के साथ आगे बढ़ने के लिए कृपया अपनी **क्यूआर कोड इमेज** भेजें।",
+        "bank_prompt": "✍️ विथड्रॉल के साथ आगे बढ़ने के लिए कृपया अपनी **बैंक खाता विवरण** (खाताधारक का नाम, खाता संख्या, IFSC कोड, बैंक का नाम) भेजें।",
+        "redeem_prompt": "✍️ कृपया **गूगल प्ले रिडीम कोड का मूल्य** दर्ज करें (उदाहरण: `100 रुपये`, `250 रुपये`)।",
+        "withdrawal_success": "✅ *विथड्रॉल रिक्वेस्ट सबमिट हो गई!* ✅\n\nराशि: *{points:.2f} पॉइंट्स* (लगभग *{rupees:.2f} रुपये*)\nविधि: *{method}*\nविवरण: *{details}*\n\nआपका शेष बैलेंस: *{balance:.2f} पॉइंट्स*।\n_आपकी रिक्वेस्ट प्रोसेस की जा रही है। कृपया 24-48 घंटे प्रतीक्षा करें।_",
+        "withdrawal_error": "🚫 आपके विथड्रॉल में कुछ समस्या आ गई। कृपया पुनः प्रयास करें।",
+        "command_usage": "⚠️ कृपया बटनों का उपयोग करके नेविगेट करें।",
+        "referrer_joined": "🎉 *नया रेफरल!* 🎉\n\nआपका रेफरल `@{user_username}` बॉट में शामिल हो गया है!\n\n_आपने {referral_points_per_referral:.2f} पॉइंट्स कमाए हैं।_",
+        "invalid_referrer": "🚫 अमान्य रेफरल लिंक या आप पहले ही रेफर किए जा चुके हैं।",
+        "self_referral": "😅 आप खुद को रेफर नहीं कर सकते!",
+        "referral_link_text": "👨‍👩‍👧‍👦 *अपने दोस्तों को इनवाइट करें और कमाएँ!* 👨‍👩‍👧‍👦\n\nयह लिंक साझा करें:\n`{referral_link}`\n\nआपके लिंक के माध्यम से जुड़ने वाले प्रत्येक दोस्त के लिए, आप *{referral_points_per_referral:.2f} पॉइंट्स* कमाएँगे!\n\nआपके कुल रेफरल: *{referral_count}*",
+        "generic_error": "😔 एक अप्रत्याशित त्रुटि हुई। कृपया बाद में पुनः प्रयास करें या /start टाइप करके मुख्य मेनू पर जाएँ।",
+        "action_not_valid": "⛔ वह कार्रवाई अभी मान्य नहीं है। कृपया मेनू बटनों का उपयोग करें।",
+        "approve_button": "✅ मंज़ूर करें",
+        "reject_button": "❌ ख़ारिज करें",
+        "back_to_menu": "🏠 मुख्य मेनू पर वापस",
+        "help_text": "❓ *सहायता और जानकारी*\n\nहमारे अर्निंग बॉट में आपका स्वागत है! यह ऐसे काम करता है:\n\n*1. पॉइंट्स कमाएँ:*\n   - *शॉर्टलिंक हल करें:* 'पॉइंट्स कमाएँ' -> 'शॉर्टलिंक हल करें' पर क्लिक करें। निर्देशों का पालन करें, शॉर्टलिंक पूरा करें, और पॉइंट्स कमाने के लिए 'मैंने पूरा कर लिया!' पर क्लिक करें।\n   - *चैनल/ग्रुप जॉइन करें:* 'पॉइंट्स कमाएँ' -> 'चैनल/ग्रुप जॉइन करें' पर क्लिक करें। सूचीबद्ध चैनलों/ग्रुपों को जॉइन करें और अपने पॉइंट्स एक बार क्लेम करें।\n\n*2. इनवाइट करें और कमाएँ:*\n   - अपना यूनिक रेफरल लिंक प्राप्त करने के लिए 'इनवाइट करें और कमाएँ' पर क्लिक करें। इसे दोस्तों के साथ साझा करें। आपको प्रत्येक सफल रेफरल के लिए पॉइंट्स मिलते हैं!\n\n*3. मेरी प्रोफ़ाइल:*\n   - अपना वर्तमान बैलेंस, हल किए गए कुल शॉर्टलिंक्स और रेफरल देखने के लिए 'मेरी प्रोफ़ाइल' पर क्लिक करें। आप यहां से विथड्रॉल भी शुरू कर सकते हैं।\n\n*4. विथड्रॉ करें:*\n   - 'विथड्रॉ करें' पर क्लिक करें। विथड्रॉ करने के लिए आपको कम से कम {min_points:.2f} पॉइंट्स ({min_rupees:.2f} रुपये) चाहिए।\n   - उन पॉइंट्स की संख्या दर्ज करें जिन्हें आप विथड्रॉ करना चाहते हैं। बॉट स्वचालित रूप से आपको रुपये में समकक्ष राशि दिखाएगा।\n   - अपनी पसंदीदा विधि चुनें: UPI, QR कोड, बैंक ट्रांसफर (1 पॉइंट = {upi_qr_bank_rate:.2f} रुपये) या गूगल प्ले रिडीम कोड (1 पॉइंट = {redeem_rate:.2f} रुपये)।\n   - आवश्यक विवरण प्रदान करें।\n   - आपकी रिक्वेस्ट प्रोसेसिंग के लिए एडमिन को भेज दी जाएगी।\n\n_यदि आपके कोई और प्रश्न हैं, तो कृपया बॉट एडमिन से संपर्क करें।_",
     }
 }
 
-# --- विथड्रॉल स्टेटस अपडेट मैसेजेस ---
-# यह डिक्शनरी विथड्रॉल की मंजूरी या अस्वीकृति के बाद यूज़र को भेजे गए संदेशों को रखती है।
 WITHDRAWAL_STATUS_UPDATE_MESSAGES = {
     "en": {
-        "approved": "🎉 Good news! Your withdrawal request for **{points:.2f} points** ({rupees:.2f} Rs.) has been **APPROVED** and processed. Your funds should reach your account soon.\n\nThank you for using our bot!",
-        "rejected": "😞 Your withdrawal request for **{points:.2f} points** ({rupees:.2f} Rs.) has been **REJECTED**. This might be due to incorrect details or other reasons. Please contact support if you have questions.",
-        "already_processed": "This withdrawal request has already been processed."
+        "approved": "✅ *Your withdrawal request has been APPROVED!* ✅\n\nAmount: *{points:.2f} Points* (approx. *{rupees:.2f} Rs*)\n\n_The payment should be processed shortly._",
+        "rejected": "❌ *Your withdrawal request has been REJECTED!* ❌\n\nAmount: *{points:.2f} Points* (approx. *{rupees:.2f} Rs*)\n\n_Reason: There might be an issue with your details or eligibility. Please check and try again._",
+        "already_processed": "⚠️ This withdrawal request has already been processed.",
     },
     "hi": {
-        "approved": "🎉 अच्छी खबर! आपकी **{points:.2f} पॉइंट्स** ({rupees:.2f} रुपये) की विथड्रॉल रिक्वेस्ट **मंज़ूर** हो गई है और प्रोसेस कर दी गई है। आपके पैसे जल्द ही आपके खाते में पहुंच जाएंगे।\n\nहमारे बॉट का उपयोग करने के लिए धन्यवाद!",
-        "rejected": "😞 आपकी **{points:.2f} पॉइंट्स** ({rupees:.2f} रुपये) की विथड्रॉल रिक्वेस्ट **ख़ारिज** कर दी गई है। यह गलत विवरण या अन्य कारणों से हो सकता है। यदि आपके कोई प्रश्न हैं तो कृपया सहायता से संपर्क करें।",
-        "already_processed": "यह विथड्रॉल रिक्वेस्ट पहले ही प्रोसेस की जा चुकी है।"
+        "approved": "✅ *आपकी विथड्रॉल रिक्वेस्ट मंज़ूर कर ली गई है!* ✅\n\nराशि: *{points:.2f} पॉइंट्स* (लगभग *{rupees:.2f} रुपये*)\n\n_भुगतान जल्द ही प्रोसेस हो जाएगा।_",
+        "rejected": "❌ *आपकी विथड्रॉल रिक्वेस्ट ख़ारिज कर दी गई है!* ❌\n\nराशि: *{points:.2f} पॉइंट्स* (लगभग *{rupees:.2f} रुपये*)\n\n_कारण: आपके विवरण या पात्रता में कोई समस्या हो सकती है। कृपया जांच करें और पुनः प्रयास करें।_",
+        "already_processed": "⚠️ यह विथड्रॉल रिक्वेस्ट पहले ही प्रोसेस हो चुकी है।",
     }
 }
 
-
-DEFAULT_LANGUAGE = "en" # डिफ़ॉल्ट भाषा
-
-# --- अनुवादित टेक्स्ट प्राप्त करने के लिए हेल्पर फ़ंक्शन ---
-# यह फ़ंक्शन यूज़र की भाषा के अनुसार सही अनुवादित टेक्स्ट लौटाता है।
-# अगर किसी भाषा में कोई टेक्स्ट मौजूद नहीं है, तो यह डिफ़ॉल्ट भाषा (अंग्रेज़ी) का उपयोग करेगा।
 def get_text(user_id, key, **kwargs):
-    # **महत्वपूर्ण: get_user_language को डेटाबेस_यूटिल्स.py से इंपोर्ट करना होगा**
-    from database_utils import get_user_language # <-- यह लाइन बदल दी गई है
+    """उपयोगकर्ता की भाषा या डिफ़ॉल्ट के आधार पर टेक्स्ट प्राप्त करता है।"""
+    from database_utils import get_user_language # परिपत्र निर्भरता से बचने के लिए स्थानीय रूप से आयात करें
 
-    lang_code = get_user_language(user_id)
-    text_dict = LANGUAGES.get(lang_code, LANGUAGES[DEFAULT_LANGUAGE])
-    return text_dict.get(key, LANGUAGES[DEFAULT_LANGUAGE].get(key, f"Missing text for key: {key} in {lang_code}")).format(**kwargs)
+    user_lang = get_user_language(user_id)
+    # उपयोगकर्ता की पसंदीदा भाषा से टेक्स्ट प्राप्त करने का प्रयास करें
+    if user_lang in LANGUAGES and key in LANGUAGES[user_lang]:
+        return LANGUAGES[user_lang][key].format(**kwargs)
+    # डिफ़ॉल्ट भाषा पर वापस लौटें
+    elif key in LANGUAGES[DEFAULT_LANGUAGE]:
+        return LANGUAGES[DEFAULT_LANGUAGE][key].format(**kwargs)
+    else:
+        return f"KEY: {key} के लिए टेक्स्ट गुम है" # गुम टेक्स्ट के लिए फॉलबैक
