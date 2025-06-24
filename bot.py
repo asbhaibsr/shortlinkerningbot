@@ -15,9 +15,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMe
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 )
-
-# Flask imports for handling webhooks
-from flask import Flask, request, jsonify
+from telegram.constants import ParseMode # ParseMode के लिए इंपोर्ट
+from telegram.helpers import escape_markdown # Markdown वर्णों को एस्केप करने के लिए इंपोर्ट
 
 # आपकी कस्टम इम्पोर्ट्स
 # सुनिश्चित करें कि config.py में आपके सभी आवश्यक चर हैं,
@@ -71,7 +70,7 @@ def get_back_to_menu_keyboard(user_id):
     keyboard = [[InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="back_to_main_menu")]]
     return InlineKeyboardMarkup(keyboard)
 
-# --- API से शॉर्टलिंक लाने के लिए हेल्पर फ़ंक्शन ---
+# --- API से शॉर्टलिंक लाने के लिए हेल्per फ़ंक्शन ---
 async def fetch_new_shortlink_from_api(user_id, target_url=None):
     """
     कॉन्फ़िगर किए गए API (arlinks.in) से एक नया शॉर्टलिंक लाता है।
@@ -163,7 +162,7 @@ async def handle_shortlink_webhook_post():
                         chat_id=int(user_id),
                         text=message_text,
                         reply_markup=get_main_menu_keyboard(int(user_id)),
-                        parse_mode='Markdown'
+                        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
                     )
                 except Exception as e:
                     logger.error(f"Flask से टेलीग्राम संदेश भेजने में त्रुटि (उपयोगकर्ता {user_id}): {e}")
@@ -204,7 +203,7 @@ async def handle_shortlink_webhook_get():
                         chat_id=int(user_id),
                         text=message_text,
                         reply_markup=get_main_menu_keyboard(int(user_id)),
-                        parse_mode='Markdown'
+                        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
                     )
                 except Exception as e:
                     logger.error(f"Flask से टेलीग्राम संदेश भेजने में त्रुटि (उपयोगकर्ता {user_id}): {e}")
@@ -261,32 +260,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await context.bot.send_message(
                 chat_id=referrer_id,
-                text=get_text(referrer_id, "referrer_joined", user_username=referrer_username, referral_points_per_referral=REFERRAL_POINTS_PER_REFERRAL),
-                parse_mode='Markdown'
+                text=get_text(referrer_id, "referrer_joined", user_username=escape_markdown(referrer_username, version=2), referral_points_per_referral=REFERRAL_POINTS_PER_REFERRAL),
+                parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
             )
             logger.info(f"उपयोगकर्ता {user_id} को {referrer_id} द्वारा रेफर किया गया। रेफरर को {REFERRAL_POINTS_PER_REFERRAL} अंक क्रेडिट किए गए।")
             # रेफरल प्रोसेसिंग के बाद स्वागत संदेश भेजें
             user_data = get_user_data(user_id) # उपयोगकर्ता डेटा रीफ्रेश करें
             await update.message.reply_text(
-                get_text(user_id, "welcome", first_name=update.effective_user.first_name,
+                get_text(user_id, "welcome", first_name=escape_markdown(update.effective_user.first_name, version=2),
                                  balance=user_data["balance"]),
                 reply_markup=get_main_menu_keyboard(user_id),
-                parse_mode='Markdown'
+                parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
             )
             return
         else:
-            await update.message.reply_text(get_text(user_id, "invalid_referrer"), reply_markup=get_main_menu_keyboard(user_id))
+            await update.message.reply_text(get_text(user_id, "invalid_referrer"), reply_markup=get_main_menu_keyboard(user_id), parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
             return
     elif referrer_id == user_id:
-        await update.message.reply_text(get_text(user_id, "self_referral"), reply_markup=get_main_menu_keyboard(user_id))
+        await update.message.reply_text(get_text(user_id, "self_referral"), reply_markup=get_main_menu_keyboard(user_id), parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
         return
 
     # यदि कोई रेफरल नहीं है या रेफरल पहले ही प्रोसेस हो चुका है तो सामान्य स्वागत संदेश
     await update.message.reply_text(
-        get_text(user_id, "welcome", first_name=update.effective_user.first_name,
+        get_text(user_id, "welcome", first_name=escape_markdown(update.effective_user.first_name, version=2),
                                  balance=user_data["balance"]),
         reply_markup=get_main_menu_keyboard(user_id),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
 
 async def check_force_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
@@ -302,9 +301,9 @@ async def check_force_subscribe(update: Update, context: ContextTypes.DEFAULT_TY
             ]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await (update.message or update.callback_query.message).reply_text(
-                get_text(user_id, "force_subscribe_text", channel_username=FORCE_SUBSCRIBE_CHANNEL_USERNAME),
+                get_text(user_id, "force_subscribe_text", channel_username=escape_markdown(FORCE_SUBSCRIBE_CHANNEL_USERNAME, version=2)),
                 reply_markup=reply_markup,
-                parse_mode='Markdown'
+                parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
             )
             return False
     except Exception as e:
@@ -315,9 +314,9 @@ async def check_force_subscribe(update: Update, context: ContextTypes.DEFAULT_TY
         ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await (update.message or update.callback_query.message).reply_text(
-            get_text(user_id, "not_joined_error", channel_username=FORCE_SUBSCRIBE_CHANNEL_USERNAME),
+            get_text(user_id, "not_joined_error", channel_username=escape_markdown(FORCE_SUBSCRIBE_CHANNEL_USERNAME, version=2)),
             reply_markup=reply_markup,
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
         )
         return False
 
@@ -339,10 +338,10 @@ async def handle_force_subscribe_check_callback(update: Update, context: Context
             )
         else:
             await query.edit_message_text(
-                get_text(user_id, "welcome", first_name=query.from_user.first_name,
+                get_text(user_id, "welcome", first_name=escape_markdown(query.from_user.first_name, version=2),
                                  balance=user_data["balance"]),
                 reply_markup=get_main_menu_keyboard(user_id),
-                parse_mode='Markdown'
+                parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
             )
     else:
         pass # कुछ न करें, क्योंकि पिछले फ़ंक्शन ने पहले ही संदेश को हैंडल कर लिया है।
@@ -365,10 +364,10 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_data = get_user_data(user_id)
     await query.edit_message_text(
-        get_text(user_id, "welcome", first_name=query.from_user.first_name,
+        get_text(user_id, "welcome", first_name=escape_markdown(query.from_user.first_name, version=2),
                                  balance=user_data["balance"]),
         reply_markup=get_main_menu_keyboard(user_id),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
 
 async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -378,10 +377,10 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     await query.edit_message_text(
-        get_text(user_id, "welcome", first_name=query.from_user.first_name,
+        get_text(user_id, "welcome", first_name=escape_markdown(query.from_user.first_name, version=2),
                                  balance=user_data["balance"]),
         reply_markup=get_main_menu_keyboard(user_id),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
     # यदि उपयोगकर्ता मुख्य मेनू पर वापस जाता है तो किसी भी सक्रिय स्थिति को साफ़ करें
     context.user_data.pop('withdraw_state', None)
@@ -407,7 +406,7 @@ async def show_earn_points_menu(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text(
         get_text(user_id, "earn_options_prompt"),
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
 
 # --- शॉर्टलिंक कमाई लॉजिक ---
@@ -421,13 +420,13 @@ async def earn_shortlinks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # सबसे पहले, निर्देश भेजें
     await query.edit_message_text(
         get_text(user_id, "shortlink_instructions", points_per_shortlink=POINTS_PER_SHORTLINK),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
     # फिर तुरंत शॉर्टलिंक प्रदान करें
     shortlink, task_id = await fetch_new_shortlink_from_api(user_id)
 
     if not shortlink:
-        await context.bot.send_message(chat_id=user_id, text=get_text(user_id, "shortlink_unavailable"), reply_markup=get_main_menu_keyboard(user_id))
+        await context.bot.send_message(chat_id=user_id, text=get_text(user_id, "shortlink_unavailable"), reply_markup=get_main_menu_keyboard(user_id), parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
         return
 
     # बाद में सत्यापन के लिए task_id (या शॉर्टलिंक यदि task_id का उपयोग शॉर्टनर द्वारा नहीं किया जाता है) स्टोर करें
@@ -447,7 +446,7 @@ async def earn_shortlinks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id=user_id,
         text=get_text(user_id, "shortlink_given", shortlink=shortlink),
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
 
 async def done_shortlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -492,9 +491,9 @@ async def done_shortlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="earn_points_menu")])
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
     else:
-        await query.edit_message_text(get_text(user_id, "no_shortlink_started"), reply_markup=get_main_menu_keyboard(user_id), parse_mode='Markdown')
+        await query.edit_message_text(get_text(user_id, "no_shortlink_started"), reply_markup=get_main_menu_keyboard(user_id), parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
 
 
 # --- चैनल/ग्रुप जॉइन कमाई लॉजिक ---
@@ -513,7 +512,7 @@ async def earn_join_channels(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(
             get_text(user_id, "no_more_channels"),
             reply_markup=get_back_to_menu_keyboard(user_id),
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
         )
         return
 
@@ -529,7 +528,7 @@ async def earn_join_channels(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text(
         get_text(user_id, "channels_to_join_prompt"),
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
 
 async def claim_channel_points(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -548,7 +547,7 @@ async def claim_channel_points(update: Update, context: ContextTypes.DEFAULT_TYP
             break
 
     if channel_id in user_data["joined_channels"]:
-        await query.answer(get_text(user_id, "channel_already_claimed", channel_username=channel_username), show_alert=True)
+        await query.answer(get_text(user_id, "channel_already_claimed", channel_username=escape_markdown(channel_username, version=2)), show_alert=True)
         return
 
     try:
@@ -557,13 +556,13 @@ async def claim_channel_points(update: Update, context: ContextTypes.DEFAULT_TYP
             update_user_data(user_id, balance_change=POINTS_PER_CHANNEL_JOIN, add_joined_channel=channel_id)
             user_data = get_user_data(user_id) # डेटा रीफ्रेश करें
 
-            await query.answer(get_text(user_id, "channel_claim_success", points=POINTS_PER_CHANNEL_JOIN, channel_username=channel_username, balance=user_data["balance"]), show_alert=True)
+            await query.answer(get_text(user_id, "channel_claim_success", points=POINTS_PER_CHANNEL_JOIN, channel_username=escape_markdown(channel_username, version=2), balance=user_data["balance"]), show_alert=True)
 
             # सूची को अपडेट करने के लिए earn_join_channels मेनू को फिर से भेजें
             await earn_join_channels(update, context) # रीफ्रेश करने के लिए हैंडलर को फिर से कॉल करें
 
         else:
-            await query.answer(get_text(user_id, "channel_not_joined", channel_username=channel_username), show_alert=True)
+            await query.answer(get_text(user_id, "channel_not_joined", channel_username=escape_markdown(channel_username, version=2)), show_alert=True)
             return
 
     except Exception as e:
@@ -578,8 +577,8 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = get_user_data(user_id)
     await query.answer()
 
+    # 'user_id=user_id' को हटाया गया क्योंकि यह पहले से ही पहले तर्क के रूप में पास किया गया है।
     profile_text = get_text(user_id, "profile_text",
-                            user_id=user_id,
                             balance=user_data["balance"],
                             shortlinks_solved_count=user_data["shortlinks_solved_count"],
                             referral_count=user_data["referral_count"],
@@ -588,7 +587,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         profile_text,
         reply_markup=get_back_to_menu_keyboard(user_id),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
 
 async def show_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -599,12 +598,12 @@ async def show_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     referral_link = f"https://t.me/{context.bot.username}?start=ref_{user_id}"
     invite_text = get_text(user_id, "invite_text",
                            referral_points_per_referral=REFERRAL_POINTS_PER_REFERRAL,
-                           referral_link=referral_link)
+                           referral_link=referral_link) # referral_link को escape_markdown() की आवश्यकता नहीं है यदि यह [text](url) के भीतर है।
 
     await query.edit_message_text(
         invite_text,
         reply_markup=get_back_to_menu_keyboard(user_id),
-        parse_mode='Markdown',
+        parse_mode=ParseMode.MARKDOWN_V2, # ParseMode.MARKDOWN_V2 का उपयोग करें
         disable_web_page_preview=True
     )
 
@@ -613,11 +612,12 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     await query.answer()
 
-    help_text = get_text(user_id, "help_text")
+    # KeyError: 'min_points' को हल करने के लिए min_points पास किया गया
+    help_text = get_text(user_id, "help_text", min_points=MIN_WITHDRAWAL_POINTS)
     await query.edit_message_text(
         help_text,
         reply_markup=get_back_to_menu_keyboard(user_id),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
 
 # --- निकासी लॉजिक ---
@@ -633,7 +633,7 @@ async def start_withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
                      balance=user_data["balance"],
                      min_withdrawal_points=MIN_WITHDRAWAL_POINTS),
             reply_markup=get_back_to_menu_keyboard(user_id),
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
         )
         return
 
@@ -646,7 +646,7 @@ async def start_withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  min_withdrawal_points=MIN_WITHDRAWAL_POINTS,
                  current_balance=user_data["balance"]),
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
 
 async def handle_withdrawal_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -660,7 +660,7 @@ async def handle_withdrawal_amount(update: Update, context: ContextTypes.DEFAULT
             await update.message.reply_text(
                 get_text(user_id, "withdrawal_amount_too_low", min_withdrawal_points=MIN_WITHDRAWAL_POINTS),
                 reply_markup=get_back_to_menu_keyboard(user_id),
-                parse_mode='Markdown'
+                parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
             )
             return
         user_data = get_user_data(user_id)
@@ -668,7 +668,7 @@ async def handle_withdrawal_amount(update: Update, context: ContextTypes.DEFAULT
             await update.message.reply_text(
                 get_text(user_id, "insufficient_balance", balance=user_data["balance"]),
                 reply_markup=get_back_to_menu_keyboard(user_id),
-                parse_mode='Markdown'
+                parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
             )
             return
 
@@ -685,14 +685,14 @@ async def handle_withdrawal_amount(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text(
             get_text(user_id, "choose_withdrawal_method", points=amount_points),
             reply_markup=reply_markup,
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
         )
 
     except ValueError:
         await update.message.reply_text(
             get_text(user_id, "invalid_amount_format"),
             reply_markup=get_back_to_menu_keyboard(user_id),
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
         )
 
 async def handle_withdrawal_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -701,7 +701,7 @@ async def handle_withdrawal_method(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
 
     if context.user_data.get('withdraw_state') != 'awaiting_method':
-        await query.edit_message_text(get_text(user_id, "unexpected_action"), reply_markup=get_main_menu_keyboard(user_id))
+        await query.edit_message_text(get_text(user_id, "unexpected_action"), reply_markup=get_main_menu_keyboard(user_id), parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
         return
 
     method = query.data.replace("withdraw_method_", "")
@@ -717,7 +717,7 @@ async def handle_withdrawal_method(update: Update, context: ContextTypes.DEFAULT
         await query.edit_message_text(
             get_text(user_id, "enter_upi_id", points=amount_points, rupees=amount_rupees),
             reply_markup=get_back_to_menu_keyboard(user_id),
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
         )
     elif method == "redeem_code":
         amount_rupees = amount_points / REDEEM_CODE_POINTS_TO_RUPEES_RATE
@@ -733,10 +733,10 @@ async def handle_withdrawal_method(update: Update, context: ContextTypes.DEFAULT
         await query.edit_message_text(
             get_text(user_id, "confirm_redeem_code_withdrawal_prompt", points=amount_points, rupees=amount_rupees),
             reply_markup=reply_markup,
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
         )
     else:
-        await query.edit_message_text(get_text(user_id, "invalid_method"), reply_markup=get_back_to_menu_keyboard(user_id), parse_mode='Markdown')
+        await query.edit_message_text(get_text(user_id, "invalid_method"), reply_markup=get_back_to_menu_keyboard(user_id), parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
         context.user_data.pop('withdraw_state', None)
 
 async def handle_upi_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -746,7 +746,7 @@ async def handle_upi_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     upi_id = update.message.text.strip()
     if not upi_id: # आप यहां एक अधिक मजबूत UPI ID सत्यापन जोड़ सकते हैं
-        await update.message.reply_text(get_text(user_id, "invalid_upi_id"), reply_markup=get_back_to_menu_keyboard(user_id))
+        await update.message.reply_text(get_text(user_id, "invalid_upi_id"), reply_markup=get_back_to_menu_keyboard(user_id), parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
         return
 
     context.user_data['upi_id'] = upi_id
@@ -762,9 +762,9 @@ async def handle_upi_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        get_text(user_id, "confirm_upi_withdrawal_prompt", points=amount_points, rupees=amount_rupees, upi_id=upi_id),
+        get_text(user_id, "confirm_upi_withdrawal_prompt", points=amount_points, rupees=amount_rupees, upi_id=escape_markdown(upi_id, version=2)), # UPI ID को एस्केप करें
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
 
 async def confirm_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -777,7 +777,7 @@ async def confirm_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if not (method and (current_state == 'confirm_redeem_code' and query.data == 'confirm_redeem_code_withdrawal') or
             (current_state == 'confirm_upi' and query.data == 'confirm_upi_withdrawal')):
-        await query.edit_message_text(get_text(user_id, "unexpected_action"), reply_markup=get_main_menu_keyboard(user_id))
+        await query.edit_message_text(get_text(user_id, "unexpected_action"), reply_markup=get_main_menu_keyboard(user_id), parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
         context.user_data.pop('withdraw_state', None)
         return
 
@@ -790,7 +790,7 @@ async def confirm_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(
             get_text(user_id, "insufficient_balance", balance=user_data["balance"]),
             reply_markup=get_back_to_menu_keyboard(user_id),
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
         )
         context.user_data.pop('withdraw_state', None)
         return
@@ -802,6 +802,7 @@ async def confirm_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     request_id = record_withdrawal_request(
         user_id=user_id,
         username=query.from_user.username or str(user_id),
+        first_name=query.from_user.first_name, # first_name जोड़ा गया
         amount_points=amount_points,
         amount_rupees=amount_rupees,
         method=method,
@@ -812,20 +813,20 @@ async def confirm_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         get_text(user_id, "withdrawal_submitted_user",
                  points=amount_points, rupees=amount_rupees,
                  method=method.upper().replace('_', ' '),
-                 upi_id=upi_id),
+                 upi_id=escape_markdown(upi_id, version=2)), # UPI ID को एस्केप करें
         reply_markup=get_main_menu_keyboard(user_id),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
     )
 
     # एडमिन को सूचना भेजें
     admin_message_text = get_text(user_id, "admin_new_withdrawal_request",
                                   user_id=user_id,
-                                  username=query.from_user.username or "N/A",
-                                  first_name=query.from_user.first_name,
+                                  username=escape_markdown(query.from_user.username or "N/A", version=2), # username को एस्केप करें
+                                  first_name=escape_markdown(query.from_user.first_name, version=2), # first_name को एस्केप करें
                                   points=amount_points,
                                   rupees=f"{amount_rupees:.2f}",
                                   method=method.upper().replace('_', ' '),
-                                  upi_id=upi_id,
+                                  upi_id=escape_markdown(upi_id, version=2), # UPI ID को एस्केप करें
                                   request_id=str(request_id))
 
     admin_keyboard = [[
@@ -839,7 +840,7 @@ async def confirm_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
             chat_id=ADMIN_WITHDRAWAL_CHANNEL_ID,
             text=admin_message_text,
             reply_markup=admin_reply_markup,
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN_V2 # ParseMode.MARKDOWN_V2 का उपयोग करें
         )
     except Exception as e:
         logger.error(f"एडमिन चैनल पर निकासी सूचना भेजने में त्रुटि: {e}")
@@ -874,7 +875,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if withdrawal_request.get('status') != 'Pending':
-        await query.edit_message_text(f"यह अनुरोध पहले ही **{withdrawal_request['status']}** किया जा चुका है।", parse_mode='Markdown')
+        await query.edit_message_text(f"यह अनुरोध पहले ही **{withdrawal_request['status']}** किया जा चुका है।", parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
         return
 
     requester_user_id = withdrawal_request['user_id']
@@ -911,29 +912,39 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     # एडमिन को अपडेट करें
     admin_updated_text = WITHDRAWAL_STATUS_UPDATE_MESSAGES[admin_update_message_key].format(
-        admin_username=query.from_user.username or str(user_id),
+        admin_username=escape_markdown(query.from_user.username or str(user_id), version=2), # एडमिन username को एस्केप करें
         user_id=requester_user_id,
-        username=username,
-        first_name=first_name,
+        username=escape_markdown(username, version=2), # username को एस्केप करें
+        first_name=escape_markdown(first_name, version=2), # first_name को एस्केप करें
         points=amount_points,
         rupees=f"{amount_rupees:.2f}",
         method=method.upper().replace('_', ' '),
-        upi_id=upi_id,
+        upi_id=escape_markdown(upi_id, version=2), # UPI ID को एस्केप करें
         request_id=str(request_id)
     )
-    await query.edit_message_text(admin_updated_text, parse_mode='Markdown')
+    await query.edit_message_text(admin_updated_text, parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
 
     # उपयोगकर्ता को सूचित करें
     user_final_message = WITHDRAWAL_STATUS_UPDATE_MESSAGES[user_message_key].format(
         points=amount_points,
         rupees=f"{amount_rupees:.2f}",
         method=method.upper().replace('_', ' '),
-        upi_id=upi_id
+        upi_id=escape_markdown(upi_id, version=2) # UPI ID को एस्केप करें
     )
     try:
-        await context.bot.send_message(chat_id=requester_user_id, text=user_final_message, parse_mode='Markdown')
+        await context.bot.send_message(chat_id=requester_user_id, text=user_final_message, parse_mode=ParseMode.MARKDOWN_V2) # ParseMode.MARKDOWN_V2 का उपयोग करें
     except Exception as e:
         logger.error(f"उपयोगकर्ता {requester_user_id} को स्टेटस अपडेट संदेश भेजने में विफल: {e}")
+
+    context.user_data.pop('withdraw_state', None)
+    context.user_data.pop('withdraw_amount_points', None)
+    context.user_data.pop('withdraw_amount_rupees', None)
+    context.user_data.pop('withdraw_method', None)
+    context.user_data.pop('upi_id', None)
+
+async def handle_unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    await update.message.reply_text(get_text(user_id, "unrecognized_command"), reply_markup=get_main_menu_keyboard(user_id), parse_mode=ParseMode.MARKDOWN_V2)
 
 
 # --- मुख्य फ़ंक्शन जो बॉट को चलाता है ---
@@ -967,6 +978,7 @@ async def run_bot():
     # मैसेज हैंडलर (निकासी राशि और UPI ID के लिए)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(lambda user: 'withdraw_state' in application.user_data[user.id] and application.user_data[user.id]['withdraw_state'] == 'awaiting_amount'), handle_withdrawal_amount))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(lambda user: 'withdraw_state' in application.user_data[user.id] and application.user_data[user.id]['withdraw_state'] == 'awaiting_upi_id'), handle_upi_id))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unrecognized_message)) # अज्ञात संदेशों को हैंडल करें
 
     # एडमिन हैंडलर
     application.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(approve|reject)_"))
@@ -1024,6 +1036,7 @@ async def telegram_webhook():
         application_instance.add_handler(CallbackQueryHandler(confirm_withdrawal, pattern="^confirm_redeem_code_withdrawal$|^confirm_upi_withdrawal$"))
         application_instance.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(lambda user: 'withdraw_state' in application_instance.user_data[user.id] and application_instance.user_data[user.id]['withdraw_state'] == 'awaiting_amount'), handle_withdrawal_amount))
         application_instance.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(lambda user: 'withdraw_state' in application_instance.user_data[user.id] and application_instance.user_data[user.id]['withdraw_state'] == 'awaiting_upi_id'), handle_upi_id))
+        application_instance.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unrecognized_message)) # अज्ञात संदेशों को हैंडल करें
         application_instance.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(approve|reject)_"))
 
         # एक बार बॉट इनिशियलाइज़ होने के बाद पोस्ट-इनिशियलाइज़ेशन हुक।
