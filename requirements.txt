@@ -1,5 +1,3 @@
-Flask[async]
 python-telegram-bot
 pymongo
 requests
-gunicorn
