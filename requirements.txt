@@ -1,6 +1,5 @@
-python-telegram-bot==20.0
-pymongo==4.7.3
-requests==2.32.3
 Flask
-# यदि प्रदान किए गए `bot.py` में `http.server` का उपयोग कर रहे हैं तो Flask की सख्त आवश्यकता नहीं हो सकती है
-# लेकिन उचित HTTP सर्वर हैंडलिंग के लिए यह एक अच्छी प्रथा है।
+python-telegram-bot
+pymongo
+requests
+gunicorn
