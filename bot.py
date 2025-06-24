@@ -333,6 +333,39 @@ application.add_handler(CallbackQueryHandler(check_balance_callback, pattern="^c
 application.add_handler(CallbackQueryHandler(withdraw_points_callback, pattern="^withdraw_points$"))
 
 
+# Flask ऐप के शुरू होने पर Telegram Application को इनिशियलाइज़ और वेबहुक सेट करें।
+# यह Gunicorn द्वारा bot.py मॉड्यूल को लोड करते समय चलेगा।
+try:
+    # एक नया इवेंट लूप बनाएं और उसे सेट करें ताकि यह Gunicorn के लूप से टकराए नहीं
+    new_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(new_loop)
+
+    async def initial_telegram_setup():
+        full_webhook_url = f"{WEBHOOK_URL}/{BOT_TOKEN}"
+        try:
+            current_webhook_info = await application.bot.get_webhook_info()
+            if current_webhook_info.url != full_webhook_url:
+                await application.bot.set_webhook(url=full_webhook_url)
+                logger.info(f"Telegram webhook set to: {full_webhook_url}")
+            else:
+                logger.info(f"Telegram webhook already set to: {full_webhook_url}")
+        except Exception as e:
+            logger.error(f"Failed to set Telegram webhook: {e}", exc_info=True)
+            # यदि वेबहुक सेट नहीं होता है तो भी आगे बढ़ें, लेकिन यह समस्या का संकेत है
+
+        await application.initialize()
+        await application.start() # यह internal PTB logic शुरू करता है
+        logger.info("Telegram Application initialized and started (webhook mode).")
+
+    # प्रारंभिक सेटअप को नए इवेंट लूप में चलाएं
+    new_loop.run_until_complete(initial_telegram_setup())
+    new_loop.close() # अस्थायी लूप को बंद करें
+
+except Exception as e:
+    logger.critical(f"FATAL ERROR during initial Telegram Application setup: {e}", exc_info=True)
+    # यदि आवश्यक सेटअप विफल रहता है तो प्रक्रिया को रोकना महत्वपूर्ण है
+    raise e
+
 # Telegram अपडेट्स को हैंडल करने के लिए Flask वेबहुक एंडपॉइंट
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 async def telegram_webhook():
@@ -347,36 +380,9 @@ async def telegram_webhook():
         logger.error(f"Error processing Telegram update: {e}", exc_info=True)
         return "error", 500
 
-# Flask ऐप के स्टार्ट होने से पहले वेबहुक को सेट करें
-@app.before_serving
-async def set_telegram_webhook():
-    """Sets up webhook and initializes the Telegram Application."""
-    full_webhook_url = f"{WEBHOOK_URL}/{BOT_TOKEN}"
-    try:
-        current_webhook_info = await application.bot.get_webhook_info()
-        if current_webhook_info.url != full_webhook_url:
-            await application.bot.set_webhook(url=full_webhook_url)
-            logger.info(f"Telegram webhook set to: {full_webhook_url}")
-        else:
-            logger.info(f"Telegram webhook already set to: {full_webhook_url}")
-    except Exception as e:
-        logger.error(f"Failed to set Telegram webhook: {e}", exc_info=True)
-    
-    # Flask ऐप के भीतर Application को initialize करें
-    await application.initialize()
-    logger.info("Telegram Application initialized.")
-
-# Flask ऐप के बंद होने पर Telegram Application को बंद करें
-@app.teardown_appcontext
-async def shutdown_telegram_application(exception=None):
-    """Shuts down the Telegram Application gracefully."""
-    logger.info("Shutting down Telegram Application.")
-    await application.shutdown()
-
-# यह सुनिश्चित करने के लिए कि Flask ऐप Gunicorn द्वारा उठाया गया है
-# मुख्य ब्लॉक में केवल Flask ऐप को रखना चाहिए
+# यदि आप इसे सीधे चला रहे हैं (केवल विकास/परीक्षण के लिए, उत्पादन के लिए नहीं)
+# Koyeb जैसे प्रोडक्शन में Gunicorn 'app' ऑब्जेक्ट को सीधे उठाएगा
 if __name__ == "__main__":
-    # विकास के लिए सीधे Flask ऐप चलाएं।
-    # उत्पादन में, Gunicorn 'app' ऑब्जेक्ट को सीधे उठाएगा।
     logger.info("Running Flask app in development mode.")
+    # Flask ऐप को run करें। Gunicorn इस 'app' ऑब्जेक्ट को उठाएगा।
     app.run(host="0.0.0.0", port=8000, debug=True)
