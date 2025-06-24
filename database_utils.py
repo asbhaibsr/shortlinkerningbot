@@ -1,5 +1,3 @@
-# database_utils.py
-
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 from datetime import datetime
@@ -59,6 +57,7 @@ def get_user_data(user_id: int):
             "referred_by": None,
             "last_given_shortlink": None,
             "language": DEFAULT_LANGUAGE,
+            "language_set": False, # नया: भाषा सेट की गई है या नहीं इसका ट्रैक रखने के लिए
             "joined_channels": [], # पॉइंट्स के लिए क्लेम किए गए चैनल_आईडी की सूची
             "joined_at": datetime.now()
         }
@@ -68,17 +67,32 @@ def get_user_data(user_id: int):
     else:
         # सुनिश्चित करें कि मौजूदा उपयोगकर्ताओं के लिए सभी आवश्यक फ़ील्ड मौजूद हैं (पिछली संगतता के लिए)
         updated = False
+        if "balance" not in user_data: # सुनिश्चित करें कि संतुलन है
+            user_data["balance"] = 0.0
+            updated = True
+        if "shortlinks_solved_count" not in user_data:
+            user_data["shortlinks_solved_count"] = 0
+            updated = True
+        if "referral_count" not in user_data:
+            user_data["referral_count"] = 0
+            updated = True
         if "referred_by" not in user_data:
             user_data["referred_by"] = None
             updated = True
         if "language" not in user_data:
             user_data["language"] = DEFAULT_LANGUAGE
             updated = True
+        if "language_set" not in user_data: # नया फ़ील्ड चेक
+            user_data["language_set"] = False
+            updated = True
         if "last_given_shortlink" not in user_data:
             user_data["last_given_shortlink"] = None
             updated = True
         if "joined_channels" not in user_data:
             user_data["joined_channels"] = []
+            updated = True
+        if "joined_at" not in user_data:
+            user_data["joined_at"] = datetime.now()
             updated = True
 
         if updated:
@@ -92,14 +106,15 @@ def update_user_data(user_id: int, balance_change: float = 0,
                      referral_count_change: int = 0,
                      set_referred_by: int = None,
                      new_last_shortlink: str = None,
-                     add_joined_channel: int = None): # जॉइन किए गए चैनलों के लिए नया पैरामीटर
+                     add_joined_channel: int = None,
+                     set_fields: dict = None): # <-- यह नया पैरामीटर है
     """डेटाबेस में उपयोगकर्ता डेटा अपडेट करता है।"""
     if users_collection is None:
         init_db()
 
     update_fields = {}
     if balance_change != 0:
-        update_fields["$inc"] = {"balance": balance_change}
+        update_fields.setdefault("$inc", {})["balance"] = balance_change
     if shortlinks_solved_change != 0:
         update_fields.setdefault("$inc", {})["shortlinks_solved_count"] = shortlinks_solved_change
     if referral_count_change != 0:
@@ -109,8 +124,12 @@ def update_user_data(user_id: int, balance_change: float = 0,
     if new_last_shortlink is not None:
         update_fields.setdefault("$set", {})["last_given_shortlink"] = new_last_shortlink
     if add_joined_channel is not None:
-        # आइटम को केवल तभी जोड़ने के लिए $addToSet का उपयोग करना जब वह पहले से मौजूद न हो
         update_fields.setdefault("$addToSet", {})["joined_channels"] = add_joined_channel
+    
+    # नया: set_fields डिक्शनरी से किसी भी फील्ड को सीधे सेट करें
+    if set_fields:
+        update_fields.setdefault("$set", {}).update(set_fields)
+
 
     if update_fields:
         users_collection.update_one({"user_id": user_id}, update_fields)
