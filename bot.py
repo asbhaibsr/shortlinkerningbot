@@ -3,36 +3,35 @@
 import random
 import requests
 import logging
-import os
-import json
-import threading
-import asyncio
-import urllib.parse
-from datetime import datetime
-from bson.objectid import ObjectId # MongoDB ObjectIds के लिए आवश्यक
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 )
-from telegram.constants import ParseMode # ParseMode के लिए इंपोर्ट
-from telegram.helpers import escape_markdown # Markdown वर्णों को एस्केप करने के लिए इंपोर्ट
+from datetime import datetime
+from bson.objectid import ObjectId # MongoDB ObjectIds के लिए आवश्यक
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+import threading
+import asyncio # Webhook हैंडलर में async कार्यों को चलाने के लिए
+import urllib.parse # Webhook GET अनुरोधों को पार्स करने के लिए
+import os # पर्यावरण चर तक पहुंचने के लिए
+
+# Flask को इम्पोर्ट करें
+from flask import Flask # <--- यह लाइन जोड़ें
 
 # आपकी कस्टम इम्पोर्ट्स
-# सुनिश्चित करें कि config.py में आपके सभी आवश्यक चर हैं,
-# और WEBHOOK_URL पर्यावरण चर से पढ़ा जा रहा है।
 from config import (
     BOT_TOKEN, ADMIN_WITHDRAWAL_CHANNEL_ID, SHORTLINK_API_URL, SHORTLINK_API_KEY,
     POINTS_PER_SHORTLINK, REFERRAL_POINTS_PER_REFERRAL, POINTS_PER_CHANNEL_JOIN,
     MIN_WITHDRAWAL_POINTS, UPI_QR_BANK_POINTS_TO_RUPEES_RATE, REDEEM_CODE_POINTS_TO_RUPEES_RATE,
     FORCE_SUBSCRIBE_CHANNEL_ID, FORCE_SUBSCRIBE_CHANNEL_USERNAME, JOIN_TO_EARN_CHANNELS,
-    WEBHOOK_URL # वेबहुक सेट करने के लिए, सुनिश्चित करें कि यह पर्यावरण से आ रहा है।
+    WEBHOOK_URL # वेबहुक सेट करने के लिए
 )
 from languages import LANGUAGES, WITHDRAWAL_STATUS_UPDATE_MESSAGES, DEFAULT_LANGUAGE, get_text
 from database_utils import (
     init_db, get_user_data, update_user_data, record_withdrawal_request,
     set_user_language, withdrawal_requests_collection, users_collection,
-    get_user_language, update_withdrawal_request_status
+    get_user_language, update_withdrawal_request_status...
 )
 
 # --- लॉगिंग कॉन्फ़िगर करें ---
