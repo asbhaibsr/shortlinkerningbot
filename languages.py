@@ -1,4 +1,5 @@
 # languages.py
+import logging
 
 # डिफ़ॉल्ट भाषा
 DEFAULT_LANGUAGE = "en" # आप इसे अपनी पसंद की डिफ़ॉल्ट भाषा में बदल सकते हैं (जैसे "hi" हिंदी के लिए)
