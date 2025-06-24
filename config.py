@@ -1,7 +1,7 @@
 # config.py
 
 # आपका टेलीग्राम बॉट टोकन (BotFather से प्राप्त करें)
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE" # (या Koyeb से ली गई वैल्यू)
+BOT_TOKEN = "8084485088:AAHUCtZyDcY5hcVFsW-5JfWubD4y058bByw" # (या Koyeb से ली गई वैल्यू)
 
 # निकासी सूचनाओं के लिए एडमिन चैनल ID
 ADMIN_WITHDRAWAL_CHANNEL_ID = -1002703675582 # (Koyeb से ली गई वैल्यू)
