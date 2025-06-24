@@ -24,7 +24,6 @@ from config import (
     FORCE_SUBSCRIBE_CHANNEL_ID, FORCE_SUBSCRIBE_CHANNEL_USERNAME, JOIN_TO_EARN_CHANNELS,
     WEBHOOK_URL # वेबहुक सेट करने के लिए
 )
-# यहां से WITHDRAWAL_STATUS_UPDATE_MESSAGES को हटाया गया है
 from languages import LANGUAGES, DEFAULT_LANGUAGE, get_text 
 from database_utils import (
     init_db, get_user_data, update_user_data, record_withdrawal_request,
@@ -291,7 +290,6 @@ async def check_shortlink_completion_callback(update: Update, context: ContextTy
             # अन्य आवश्यक पैरामीटर
         }
         
-        # यदि आपकी API POST लेती है, तो requests.post का उपयोग करें और data=json.dumps(params)
         response = requests.get(f"{SHORTLINK_API_URL}/status", params=check_api_params) 
         response.raise_for_status()
 
@@ -425,6 +423,8 @@ async def run_bot_and_flask():
         logger.error(f"Failed to set Telegram webhook: {e}", exc_info=True)
         # अगर वेबहुक सेट नहीं होता है तो भी ऐप को चलने दें, लेकिन यह Telegram अपडेट प्राप्त नहीं करेगा
 
+    # यहाँ initialize() को कॉल करना आवश्यक है
+    await application.initialize() 
     await application.start() # Telegram Application को शुरू करें
     logger.info("Telegram Application started (webhook mode).")
 
