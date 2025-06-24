@@ -22,7 +22,7 @@ from config import (
 from languages import LANGUAGES, DEFAULT_LANGUAGE, get_text
 from database_utils import (
     init_db, get_user_data, update_user_data, record_withdrawal_request,
-    set_user_language, withdrawal_requests_collection, users_collection,
+    set_user_language, withdrawal_requests_collection, users_collection, # users_collection यहां से इम्पोर्ट किया जा रहा है
     get_user_language, update_withdrawal_request_status
 )
 
@@ -60,7 +60,20 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # ReplyKeyboardRemove भेजें ताकि कोई भी पुराना ReplyKeyboard हटा दिया जाए।
     await update.message.reply_text(get_text("welcome_message_initial", user_lang), reply_markup=ReplyKeyboardRemove())
 
-    # 1. चैनल सदस्यता की जांच करें
+    # 2. भाषा चयन की जांच करें (यदि उपयोगकर्ता ने पहले से कोई भाषा नहीं चुनी है)
+    # पहले उपयोगकर्ता डेटा प्राप्त करें
+    user_data = get_user_data(user_id) # यह कॉल सुनिश्चित करेगा कि उपयोगकर्ता मौजूद है और उसमें `language_set` फ़ील्ड है
+    
+    if not user_data.get("language_set"): # सीधे .get() का उपयोग करें
+        text = get_text("choose_language", user_lang)
+        keyboard = []
+        for lang_code, lang_name in LANGUAGES.items():
+            keyboard.append([InlineKeyboardButton(lang_name.get("name_in_english"), callback_data=f"set_lang_{lang_code}")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(text, reply_markup=reply_markup)
+        return # यहां रुकें, आगे न बढ़ें
+
+    # 1. चैनल सदस्यता की जांच करें (भाषा चुनने के बाद करें)
     if not await is_user_subscribed(user_id, context.bot):
         if FORCE_SUBSCRIBE_CHANNEL_USERNAME:
             channel_link = f"https://t.me/{FORCE_SUBSCRIBE_CHANNEL_USERNAME}"
@@ -75,16 +88,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text(get_text("force_subscribe_error_no_username", user_lang))
         return # यहां रुकें, आगे न बढ़ें
 
-    # 2. भाषा चयन की जांच करें (यदि उपयोगकर्ता ने पहले से कोई भाषा नहीं चुनी है)
-    user_data = get_user_data(user_id)
-    if not user_data or not user_data.get("language_set"):
-        text = get_text("choose_language", user_lang)
-        keyboard = []
-        for lang_code, lang_name in LANGUAGES.items():
-            keyboard.append([InlineKeyboardButton(lang_name.get("name_in_english"), callback_data=f"set_lang_{lang_code}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(text, reply_markup=reply_markup)
-        return # यहां रुकें, आगे न बढ़ें
 
     # यदि चैनल में शामिल हो गए हैं और भाषा चुन ली गई है, तो मुख्य मेनू दिखाएं
     await show_main_menu(update, context)
@@ -98,8 +101,8 @@ async def check_subscription_callback(update: Update, context: ContextTypes.DEFA
     user_lang = get_user_language(user_id)
 
     if await is_user_subscribed(user_id, context.bot):
-        user_data = get_user_data(user_id)
-        if not user_data or not user_data.get("language_set"):
+        user_data = get_user_data(user_id) # उपयोगकर्ता डेटा फिर से प्राप्त करें
+        if not user_data.get("language_set"): # सीधे .get() का उपयोग करें
             text = get_text("choose_language", user_lang)
             keyboard = []
             for lang_code, lang_name in LANGUAGES.items():
@@ -129,7 +132,8 @@ async def change_language_callback(update: Update, context: ContextTypes.DEFAULT
     if lang_code in LANGUAGES:
         try:
             set_user_language(user_id, lang_code)
-            update_user_data(user_id, set_data={"language_set": True})
+            # यहाँ अपडेट करें `set_fields` का उपयोग करके
+            update_user_data(user_id, set_fields={"language_set": True}) 
             
             user_lang = get_user_language(user_id) # नई भाषा में पाठ प्राप्त करें
             await query.edit_message_text(get_text("language_set_success", user_lang).format(lang_name=LANGUAGES[lang_code]['name_in_english']))
@@ -276,14 +280,15 @@ async def check_shortlink_completion_callback(update: Update, context: ContextTy
                 await query.edit_message_text(get_text("user_not_found", user_lang))
                 return
 
-            if not isinstance(current_user_data.get("points"), (int, float)):
-                update_user_data(user_id, set_data={"points": 0})
-                logger.warning(f"User {user_id}'s points field was non-numeric/missing. Reset to 0 before increment.")
+            # Note: Changed 'points' to 'balance' as per your database_utils.py structure
+            if not isinstance(current_user_data.get("balance"), (int, float)):
+                update_user_data(user_id, set_fields={"balance": 0.0}) # Use set_fields
+                logger.warning(f"User {user_id}'s balance field was non-numeric/missing. Reset to 0 before increment.")
 
-            update_user_data(user_id, inc_data={"points": POINTS_PER_SHORTLINK})
+            update_user_data(user_id, balance_change=POINTS_PER_SHORTLINK, shortlinks_solved_change=1) # balance_change and shortlinks_solved_change are now correct
             
             updated_user_data = get_user_data(user_id)
-            new_balance = updated_user_data.get("points", 0)
+            new_balance = updated_user_data.get("balance", 0) # Use 'balance'
             
             await query.edit_message_text(get_text("shortlink_completed_success", user_lang).format(points=POINTS_PER_SHORTLINK, balance=new_balance))
             logger.info(f"User {user_id} completed shortlink and received {POINTS_PER_SHORTLINK} points.")
@@ -313,7 +318,7 @@ async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_T
     user_id = str(query.from_user.id)
     user_lang = get_user_language(user_id)
     user_data = get_user_data(user_id)
-    points = user_data.get("points", 0)
+    points = user_data.get("balance", 0) # Use 'balance'
     await query.edit_message_text(get_text("balance_message", user_lang).format(points=points))
 
 async def withdraw_points_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -341,45 +346,13 @@ application.add_handler(CallbackQueryHandler(withdraw_points_callback, pattern="
 
 
 # बॉट को पोलिंग मोड में चलाएं
-def main() -> None: # main() को async फ़ंक्शन से वापस सामान्य फ़ंक्शन में बदलें
+def main() -> None:
     logger.info("Starting bot in polling mode...")
-    # Polling शुरू करने से पहले किसी भी मौजूदा वेबहुक को हटा दें
-    # इन await कॉल्स को यहां से हटा दें या इन्हें non-async बनाएं, या इन्हें main() से बाहर रखें
-    # क्योंकि run_polling() एक ब्लॉक करने वाला फ़ंक्शन है जो अपना स्वयं का इवेंट लूप शुरू करता है
-    # इन्हें हटाने से समस्या हल हो जाएगी, क्योंकि वेबहुक वैसे भी उपयोग नहीं हो रहा है
-    # या इसे async def setup_webhook_cleanup(): ... async def main(): ... asyncio.run(setup_webhook_cleanup()) ... application.run_polling() में बदलें।
-    # लेकिन सरलता के लिए, यदि वेबहुक की आवश्यकता नहीं है, तो इस खंड को पूरी तरह से हटाना ही सबसे आसान है।
-
-    # ********************************************************************************
-    # *** IMPORTANT CHANGE START: REMOVE WEBHOOK CLEANUP IF NOT NEEDED IN POLLING ***
-    # ********************************************************************************
-    # अगर आपको पोलिंग मोड में पुराने वेबहुक को हटाने की कोई विशेष आवश्यकता नहीं है,
-    # तो आप सुरक्षापूर्वक इस try-except ब्लॉक को पूरी तरह से हटा सकते हैं।
-    # यह वह जगह है जहां यह "event loop already running" त्रुटि उत्पन्न हो रही है।
-    # यदि आप इसे रखना चाहते हैं, तो इसे इस तरह से हैंडल करने की आवश्यकता होगी
-    # कि यह `run_polling` के इवेंट लूप से टकराए नहीं, जो कि थोड़ा जटिल है।
-    # चूंकि आप Flask/वेबहुक का उपयोग नहीं कर रहे हैं, तो इसे हटाना सबसे आसान है।
-    #
-    # ORIGINAL CODE causing issue:
-    # try:
-    #     current_webhook_info = await application.bot.get_webhook_info() 
-    #     if current_webhook_info.url:
-    #         await application.bot.delete_webhook() 
-    #         logger.info("Existing webhook deleted.")
-    # except Exception as e:
-    #     logger.warning(f"Could not delete webhook (might not exist): {e}")
-    #
-    # ********************************************************************************
-    # *** IMPORTANT CHANGE END ***
-    # ********************************************************************************
-
-    # drop_pending_updates=True पुराने अपडेट को छोड़ देता है, जिससे बॉट तुरंत प्रतिक्रिया देता है
-    # poll_interval को कम किया जा सकता है लेकिन बहुत कम करने से API लिमिट हो सकती है
+    
+    # Existing webhook cleanup code removed / commented out for polling mode.
+    # No changes here from the last working version for this section.
+    
     application.run_polling(poll_interval=0.5, timeout=30, drop_pending_updates=True) 
-    # timeout: यह निर्धारित करता है कि Telegram API कितनी देर तक नए अपडेट के लिए इंतजार करेगा
-    # poll_interval: यह run_polling() के अंदर पोलिंग के बीच विलंब है
 
 if __name__ == "__main__":
-    # सीधे main() को कॉल करें, asyncio.run() का उपयोग न करें
-    # क्योंकि application.run_polling() खुद ही एक blocking, इवेंट-लूप-मैनेजिंग फ़ंक्शन है।
     main()
