@@ -24,7 +24,7 @@ from config import (
     FORCE_SUBSCRIBE_CHANNEL_ID, FORCE_SUBSCRIBE_CHANNEL_USERNAME, JOIN_TO_EARN_CHANNELS,
     WEBHOOK_URL # वेबहुक सेट करने के लिए
 )
-from languages import LANGUAGES, DEFAULT_LANGUAGE, get_text 
+from languages import LANGUAGES, DEFAULT_LANGUAGE, get_text
 from database_utils import (
     init_db, get_user_data, update_user_data, record_withdrawal_request,
     set_user_language, withdrawal_requests_collection, users_collection,
@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 # डेटाबेस कनेक्शन को इनिशियलाइज़ करें
 init_db()
+
+# Telegram.ext.Application इंस्टेंस को ग्लोबल बनाएं
+application = Application.builder().token(BOT_TOKEN).build()
 
 # --- सहायक कार्य: चैनल सदस्यता की जांच करें ---
 async def is_user_subscribed(user_id: str, bot) -> bool:
@@ -204,38 +207,22 @@ async def earn_points_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # Shortlink API से URL जनरेट करें
     try:
-        # VJ-FILTER-BOT की तरह, आपको SHORTENER_WEBSITE और SHORTENER_API की आवश्यकता होगी
-        # आपके config.py में SHORTLINK_API_URL और SHORTLINK_API_KEY होना चाहिए
-        # यह वह URL है जिसे शॉर्टलिंक किया जाएगा (उदाहरण के लिए, एक खाली "धन्यवाद" पेज, या एक वास्तविक मूवी लिंक)
         target_url = "https://example.com/thank-you-for-visiting-our-site" 
         
-        # आपकी Shortlink API के अनुसार पैरामीटर (VJ-FILTER-BOT के समान)
-        # VJ-FILTER-BOT में यह 'api' और 'url' लेता है
-        # यदि आपकी API 'sub_id' या 'user_id' का समर्थन करती है ताकि आप बाद में क्लिक को ट्रैक कर सकें,
-        # तो उसे यहां शामिल करें। यह अंक सत्यापित करने के लिए महत्वपूर्ण है।
-        
-        # उदाहरण: shortlink-api.com पर एक विशिष्ट API कॉल
-        # आपकी API के आधार पर, यह GET या POST अनुरोध हो सकता है।
-        # मान लीजिए आपकी API का URL SHORTLINK_API_URL = "https://yourshortener.com/api"
-        # और यह पैरामीटर्स के साथ GET अनुरोध लेता है।
         shortlink_api_params = {
             "api": SHORTLINK_API_KEY,
             "url": target_url,
-            "data": user_id # VJ-FILTER-BOT में 'data' या 'user_data' के रूप में user_id भेजें
-            # अन्य आवश्यक पैरामीटर
+            "data": user_id 
         }
         
         response = requests.get(SHORTLINK_API_URL, params=shortlink_api_params)
-        response.raise_for_status() # HTTP त्रुटियों के लिए अपवाद उठाएं
+        response.raise_for_status() 
 
         shortlink_data = response.json()
         
-        # आपकी Shortlink API के रिस्पांस स्ट्रक्चर के आधार पर शॉर्टलिंक URL निकालें
-        # VJ-FILTER-BOT में यह shortlink_data['shortenedUrl'] या shortlink_data['url'] हो सकता है
         if shortlink_data and shortlink_data.get("status") == "success" and shortlink_data.get("shortenedUrl"):
             generated_shortlink = shortlink_data["shortenedUrl"]
             
-            # उपयोगकर्ता को शॉर्टलिंक भेजें और उसे बताएं कि पूरा करने के बाद वापस आएं।
             text_message = get_text("earn_points_instructions", user_lang).format(shortlink_url=generated_shortlink)
             
             keyboard = [[
@@ -244,11 +231,6 @@ async def earn_points_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(text_message, reply_markup=reply_markup, disable_web_page_preview=True)
-            
-            # भविष्य की जांच के लिए उपयोगकर्ता की स्थिति में transaction_id या user_id सहेजें
-            # यदि आपकी API एक अद्वितीय transaction ID लौटाती है जिसे आप बाद में उपयोग कर सकते हैं, तो उसे context.user_data में सहेजें
-            # context.user_data['last_shortlink_user_id'] = user_id 
-            # context.user_data['last_shortlink_gen_time'] = datetime.now()
 
         else:
             await query.edit_message_text(get_text("error_generating_shortlink", user_lang), parse_mode='HTML')
@@ -269,25 +251,10 @@ async def check_shortlink_completion_callback(update: Update, context: ContextTy
     user_id = str(query.from_user.id)
     user_lang = get_user_language(user_id)
 
-    # यहां Shortlink API को क्वेरी करने का लॉजिक होगा कि उपयोगकर्ता ने शॉर्टलिंक पूरा किया है या नहीं।
-    # यह API आपकी Shortlink सेवा द्वारा प्रदान की जानी चाहिए।
-    # यदि आपकी Shortlink API ऐसी सुविधा नहीं देती है, तो अंक देना केवल विश्वास पर आधारित होगा।
     try:
-        # उदाहरण: Shortlink API से स्थिति जांचें।
-        # आपको API दस्तावेज़ की जांच करनी होगी कि यह कैसे काम करता है।
-        # अक्सर, आप 'sub_id' (जिसे आपने generate करते समय भेजा था) का उपयोग करेंगे।
-        
-        # यह एक काल्पनिक API कॉल है। आपको अपनी Shortlink API के अनुसार इसे बदलना होगा।
-        # VJ-FILTER-BOT में सीधे स्थिति जांचने का कोई API नहीं है; वह बस लिंक प्रदान करता है।
-        # यदि आप अंकों के लिए सत्यापन चाहते हैं, तो आपको एक ऐसी शॉर्टलिंक सेवा का उपयोग करना होगा
-        # जो क्लिकों को ट्रैक करने या पूर्णता स्थिति की जांच करने के लिए API प्रदान करती है।
-        
-        # मान लीजिए आपकी API का URL SHORTLINK_API_URL = "https://yourshortener.com/api/status"
-        # और यह 'api' और 'sub_id' लेता है।
         check_api_params = {
             "api": SHORTLINK_API_KEY,
-            "sub_id": user_id, # वह ID जिसे आपने शॉर्टलिंक जनरेट करते समय भेजा था
-            # अन्य आवश्यक पैरामीटर
+            "sub_id": user_id, 
         }
         
         response = requests.get(f"{SHORTLINK_API_URL}/status", params=check_api_params) 
@@ -295,33 +262,18 @@ async def check_shortlink_completion_callback(update: Update, context: ContextTy
 
         status_data = response.json()
         
-        # आपकी Shortlink API के रिस्पांस स्ट्रक्चर के आधार पर स्थिति जांचें
-        # उदाहरण: status_data["status"] == "completed" या status_data["clicks"] > 0
-        # आपको यह भी सुनिश्चित करना होगा कि यह क्लिक किसी नए क्लिक के लिए है न कि पुराने के लिए।
-        # इसके लिए डेटाबेस में उपयोगकर्ता के लिए 'last_checked_click_id' जैसी कुछ जानकारी सहेजनी पड़ सकती है।
-        
         if status_data and status_data.get("status") == "completed" and status_data.get("sub_id") == user_id:
-            # उपयोगकर्ता ने शॉर्टलिंक पूरा कर लिया है!
-            # उसे अंक दें
             current_user_data = get_user_data(user_id)
             if not current_user_data:
                 await query.edit_message_text(get_text("user_not_found", user_lang))
                 return
 
-            # **महत्वपूर्ण: सुनिश्चित करें कि एक ही शॉर्टलिंक के लिए कई बार अंक न दें**
-            # आपको यहां एक मैकेनिज्म जोड़ना होगा। उदाहरण के लिए:
-            # 1. जब शॉर्टलिंक जनरेट हो, तो उसे डेटाबेस में "pending" स्थिति के साथ सहेजें।
-            # 2. जब यह पूरा हो जाए, तो स्थिति को "completed" में अपडेट करें और केवल तभी अंक दें जब यह पहले से "completed" न हो।
-            # 3. आप प्रत्येक शॉर्टलिंक जनरेशन के लिए एक अद्वितीय `transaction_id` का उपयोग कर सकते हैं।
-            
-            # यदि पहली बार पूरा हुआ है
             update_user_data(user_id, {"$inc": {"points": POINTS_PER_SHORTLINK}})
             new_balance = current_user_data.get("points", 0) + POINTS_PER_SHORTLINK
             
             await query.edit_message_text(get_text("shortlink_completed_success", user_lang).format(points=POINTS_PER_SHORTLINK, balance=new_balance))
             logger.info(f"User {user_id} completed shortlink and received {POINTS_PER_SHORTLINK} points.")
         else:
-            # शॉर्टलिंक अभी तक पूरा नहीं हुआ है या कोई त्रुटि है
             await query.edit_message_text(get_text("shortlink_not_completed", user_lang))
             logger.info(f"User {user_id} shortlink not yet completed or status not confirmed.")
 
@@ -333,16 +285,11 @@ async def check_shortlink_completion_callback(update: Update, context: ContextTy
         await query.edit_message_text(get_text("error_general", user_lang), parse_mode='HTML')
 
 
-# --- अन्य बॉट फ़ंक्शंस (ये आपके मौजूदा कोड से आ सकते हैं) ---
-# यदि आपके पास refer_friend_callback, check_balance_callback,
-# withdraw_points_callback, help_info_callback, आदि हैं, तो उन्हें यहां पेस्ट करें।
-# उदाहरण के लिए:
 async def refer_friend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
     user_lang = get_user_language(user_id)
-    # आपका रेफरल लॉजिक यहाँ
     referral_link = f"https://t.me/{context.bot.username}?start=refer_{user_id}"
     await query.edit_message_text(get_text("refer_message", user_lang).format(referral_link=referral_link))
 
@@ -360,7 +307,6 @@ async def withdraw_points_callback(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     user_id = str(query.from_user.id)
     user_lang = get_user_language(user_id)
-    # आपका निकासी लॉजिक यहाँ
     await query.edit_message_text(get_text("withdraw_message", user_lang))
 
 
@@ -368,10 +314,7 @@ async def withdraw_points_callback(update: Update, context: ContextTypes.DEFAULT
 
 app = Flask(__name__) # Flask ऐप इंस्टेंस
 
-# Telegram.ext.Application इंस्टेंस
-application = Application.builder().token(BOT_TOKEN).build()
-
-# Telegram हैंडलर जोड़ें
+# Telegram हैंडलर जोड़ें (यह Application इंस्टेंस अब ग्लोबल है)
 application.add_handler(CommandHandler("start", start_command))
 application.add_handler(CommandHandler("help", help_command))
 
@@ -388,8 +331,6 @@ application.add_handler(CallbackQueryHandler(check_shortlink_completion_callback
 application.add_handler(CallbackQueryHandler(refer_friend_callback, pattern="^refer_friend$"))
 application.add_handler(CallbackQueryHandler(check_balance_callback, pattern="^check_balance$"))
 application.add_handler(CallbackQueryHandler(withdraw_points_callback, pattern="^withdraw_points$"))
-# यदि आपके पास 'help_info' के लिए एक अलग कॉलबैक है, तो उसे भी जोड़ें:
-# application.add_handler(CallbackQueryHandler(help_info_callback, pattern="^help_info$"))
 
 
 # Telegram अपडेट्स को हैंडल करने के लिए Flask वेबहुक एंडपॉइंट
@@ -406,11 +347,10 @@ async def telegram_webhook():
         logger.error(f"Error processing Telegram update: {e}", exc_info=True)
         return "error", 500
 
-# --- मुख्य फ़ंक्शन जो बॉट और Flask ऐप को चलाता है ---
-
-async def run_bot_and_flask():
-    """Sets up webhook and starts the Telegram Application."""
-    # सुनिश्चित करें कि Telegram वेबहुक सेट है
+# Flask ऐप के स्टार्ट होने से पहले वेबहुक को सेट करें
+@app.before_serving
+async def set_telegram_webhook():
+    """Sets up webhook and initializes the Telegram Application."""
     full_webhook_url = f"{WEBHOOK_URL}/{BOT_TOKEN}"
     try:
         current_webhook_info = await application.bot.get_webhook_info()
@@ -421,21 +361,22 @@ async def run_bot_and_flask():
             logger.info(f"Telegram webhook already set to: {full_webhook_url}")
     except Exception as e:
         logger.error(f"Failed to set Telegram webhook: {e}", exc_info=True)
-        # अगर वेबहुक सेट नहीं होता है तो भी ऐप को चलने दें, लेकिन यह Telegram अपडेट प्राप्त नहीं करेगा
+    
+    # Flask ऐप के भीतर Application को initialize करें
+    await application.initialize()
+    logger.info("Telegram Application initialized.")
 
-    # यहाँ initialize() को कॉल करना आवश्यक है
-    await application.initialize() 
-    await application.start() # Telegram Application को शुरू करें
-    logger.info("Telegram Application started (webhook mode).")
+# Flask ऐप के बंद होने पर Telegram Application को बंद करें
+@app.teardown_appcontext
+async def shutdown_telegram_application(exception=None):
+    """Shuts down the Telegram Application gracefully."""
+    logger.info("Shutting down Telegram Application.")
+    await application.shutdown()
 
 # यह सुनिश्चित करने के लिए कि Flask ऐप Gunicorn द्वारा उठाया गया है
 # मुख्य ब्लॉक में केवल Flask ऐप को रखना चाहिए
 if __name__ == "__main__":
-    # async run_bot_and_flask() को चलाएं (जो वेबहुक सेट करता है और Telegram ऐप शुरू करता है)
-    asyncio.run(run_bot_and_flask())
-    
-    # Flask ऐप को run करें। Koyeb पर Gunicorn इस 'app' ऑब्जेक्ट को उठाएगा।
-    # यदि आप इसे सीधे चला रहे हैं (केवल विकास/परीक्षण के लिए, उत्पादन के लिए नहीं)
-    # आप इसे इस प्रकार चला सकते हैं:
-    # app.run(host="0.0.0.0", port=8000, debug=True)
-    logger.info("Flask application is ready to be served by Gunicorn or local run.")
+    # विकास के लिए सीधे Flask ऐप चलाएं।
+    # उत्पादन में, Gunicorn 'app' ऑब्जेक्ट को सीधे उठाएगा।
+    logger.info("Running Flask app in development mode.")
+    app.run(host="0.0.0.0", port=8000, debug=True)
