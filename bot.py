@@ -228,7 +228,8 @@ class ShortlinkWebhookHandler(BaseHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
-                    self.wfile.write(b"<html><body><h1>शॉर्टलिंक पूरा हुआ!</h1><p>अब आप टेलीग्राम पर वापस जा सकते हैं।</p></body></html>")
+                    # *** यह वह जगह है जहां बदलाव किए गए हैं ***
+                    self.wfile.write("<html><body><h1>शॉर्टलिंक पूरा हुआ!</h1><p>अब आप टेलीग्राम पर वापस जा सकते हैं।</p></body></html>".encode('utf-8'))
                     
                     # आप यहां पॉइंट क्रेडिट को ट्रिगर करेंगे, POST हैंडलर के समान।
                     # सिंक्रोनस हैंडलर से अतुल्यकालिक भेजना:
@@ -237,9 +238,9 @@ class ShortlinkWebhookHandler(BaseHTTPRequestHandler):
                             application_instance.bot.send_message(
                                 chat_id=int(user_id),
                                 text=get_text(int(user_id), "shortlink_completed",
-                                            points=POINTS_PER_SHORTLINK,
-                                            solved_count=get_user_data(int(user_id))["shortlinks_solved_count"] + 1, # अस्थायी अपडेट
-                                            balance=get_user_data(int(user_id))["balance"] + POINTS_PER_SHORTLINK), # अस्थायी अपडेट
+                                                points=POINTS_PER_SHORTLINK,
+                                                solved_count=get_user_data(int(user_id))["shortlinks_solved_count"] + 1, # अस्थायी अपडेट
+                                                balance=get_user_data(int(user_id))["balance"] + POINTS_PER_SHORTLINK), # अस्थायी अपडेट
                                 reply_markup=get_main_menu_keyboard(int(user_id)),
                                 parse_mode='Markdown'
                             ),
@@ -252,7 +253,8 @@ class ShortlinkWebhookHandler(BaseHTTPRequestHandler):
                 self.send_response(200) # सामान्य वेबहुक पथ परीक्षण के लिए
                 self.send_header('Content-type', 'text/html')
                 self.end_headers()
-                self.wfile.write(b"<html><body><h1>वेबहुक लिसनर सक्रिय</h1><p>यहां POST अनुरोध भेजें।</p></body></html>")
+                # *** यह वह जगह है जहां बदलाव किए गए हैं ***
+                self.wfile.write("<html><body><h1>वेबहुक लिसनर सक्रिय</h1><p>यहां POST अनुरोध भेजें।</p></body></html>".encode('utf-8'))
 
         except Exception as e:
             logger.error(f"वेबहुक GET अनुरोध को संसाधित करने में त्रुटि: {e}")
@@ -312,7 +314,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data = get_user_data(user_id) # उपयोगकर्ता डेटा रीफ्रेश करें
             await update.message.reply_text(
                 get_text(user_id, "welcome", first_name=update.effective_user.first_name,
-                         balance=user_data["balance"]),
+                                 balance=user_data["balance"]),
                 reply_markup=get_main_menu_keyboard(user_id),
                 parse_mode='Markdown'
             )
@@ -327,7 +329,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # यदि कोई रेफरल नहीं है या रेफरल पहले ही प्रोसेस हो चुका है तो सामान्य स्वागत संदेश
     await update.message.reply_text(
         get_text(user_id, "welcome", first_name=update.effective_user.first_name,
-                 balance=user_data["balance"]),
+                         balance=user_data["balance"]),
         reply_markup=get_main_menu_keyboard(user_id),
         parse_mode='Markdown'
     )
@@ -385,7 +387,7 @@ async def handle_force_subscribe_check_callback(update: Update, context: Context
         else:
             await query.edit_message_text(
                 get_text(user_id, "welcome", first_name=query.from_user.first_name,
-                         balance=user_data["balance"]),
+                                 balance=user_data["balance"]),
                 reply_markup=get_main_menu_keyboard(user_id),
                 parse_mode='Markdown'
             )
@@ -412,7 +414,7 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = get_user_data(user_id)
     await query.edit_message_text(
         get_text(user_id, "welcome", first_name=query.from_user.first_name,
-                 balance=user_data["balance"]),
+                                 balance=user_data["balance"]),
         reply_markup=get_main_menu_keyboard(user_id),
         parse_mode='Markdown'
     )
@@ -425,7 +427,7 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(
         get_text(user_id, "welcome", first_name=query.from_user.first_name,
-                 balance=user_data["balance"]),
+                                 balance=user_data["balance"]),
         reply_markup=get_main_menu_keyboard(user_id),
         parse_mode='Markdown'
     )
@@ -626,439 +628,420 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # उपयोगकर्ता का प्रोफ़ाइल फोटो प्राप्त करें
     profile_photos = await context.bot.get_user_profile_photos(user_id)
-    photo_file_id = None
-    if profile_photos.photos and profile_photos.photos[0]:
-        # सबसे बड़ा उपलब्ध फोटो प्राप्त करें
-        photo_file_id = profile_photos.photos[0][-1].file_id
+    profile_photo_file_id = None
+    if profile_photos.photos:
+        # सबसे बड़ी उपलब्ध फोटो चुनें
+        profile_photo_file_id = profile_photos.photos[0][-1].file_id 
 
-    message_text = get_text(user_id, "profile_text",
+    profile_text = get_text(user_id, "profile_text",
                             first_name=query.from_user.first_name,
-                            balance=user_data['balance'],
-                            shortlinks_solved_count=user_data['shortlinks_solved_count'],
-                            referral_count=user_data['referral_count'])
-    
-    keyboard = [[InlineKeyboardButton(get_text(user_id, "withdraw_button"), callback_data="start_withdraw")]]
-    keyboard.append([InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="back_to_main_menu")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    if photo_file_id:
-        try:
-            await query.edit_message_media(
-                media=InputMediaPhoto(media=photo_file_id, caption=message_text, parse_mode='Markdown'),
-                reply_markup=reply_markup
-            )
-        except Exception as e:
-            logger.warning(f"उपयोगकर्ता {user_id} के लिए फोटो के साथ संदेश संपादित करने में विफल: {e}. नया संदेश भेज रहा है।")
-            # यदि फोटो के साथ संपादन विफल हो जाता है तो फॉलबैक (उदाहरण: संदेश प्रकार बदल गया)
-            await context.bot.send_photo(
-                chat_id=user_id,
-                photo=photo_file_id,
-                caption=message_text,
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-            # यदि पुराने संदेश को बिना फोटो के संपादित किया गया था तो उसे हटा दें
-            await query.delete_message()
-    else:
-        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
-
-# --- रेफरल सिस्टम ---
-async def show_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    user_data = get_user_data(user_id)
-    await query.answer()
-
-    bot_info = await context.bot.get_me()
-    bot_username = bot_info.username
-    referral_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+                            user_id=user_id,
+                            balance=user_data["balance"],
+                            total_shortlinks_solved=user_data["shortlinks_solved_count"],
+                            total_referrals=user_data["referral_count"])
 
     keyboard = [[InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="back_to_main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        get_text(user_id, "referral_link_text", referral_link=referral_link,
-                 referral_count=user_data['referral_count'],
-                 referral_points_per_referral=REFERRAL_POINTS_PER_REFERRAL),
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
+    if profile_photo_file_id:
+        try:
+            await query.edit_message_media(
+                media=InputMediaPhoto(media=profile_photo_file_id, caption=profile_text, parse_mode='Markdown'),
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.warning(f"प्रोफाइल फोटो के साथ संदेश संपादित करने में विफल: {e}. टेक्स्ट के रूप में भेज रहा हूँ।")
+            await query.edit_message_text(profile_text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await query.edit_message_text(profile_text, reply_markup=reply_markup, parse_mode='Markdown')
 
-# --- निकासी प्रणाली ---
+# --- आमंत्रण लॉजिक ---
+async def show_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    await query.answer()
+
+    referral_link = f"https://t.me/{context.bot.username}?start=ref_{user_id}"
+    invite_message = get_text(user_id, "invite_text", referral_link=referral_link, referral_points=REFERRAL_POINTS_PER_REFERRAL)
+
+    keyboard = [[InlineKeyboardButton(get_text(user_id, "share_button"), switch_inline_query=invite_message)]]
+    keyboard.append([InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="back_to_main_menu")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(invite_message, reply_markup=reply_markup, parse_mode='Markdown')
+
+# --- निकासी लॉजिक ---
+
 async def start_withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     user_data = get_user_data(user_id)
     await query.answer()
 
-    # न्यूनतम बैलेंस जांचें
     if user_data["balance"] < MIN_WITHDRAWAL_POINTS:
-        points_needed = MIN_WITHDRAWAL_POINTS - user_data["balance"]
-        message_text = get_text(user_id, "min_withdraw_balance",
-                                 balance=user_data['balance'],
-                                 min_points=MIN_WITHDRAWAL_POINTS,
-                                 min_rupees=MIN_WITHDRAWAL_POINTS * UPI_QR_BANK_POINTS_TO_RUPEES_RATE) # मैसेज के लिए बेस रेट का उपयोग करें
-        
-        keyboard = [[InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="back_to_main_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(
+            get_text(user_id, "insufficient_points", min_points=MIN_WITHDRAWAL_POINTS),
+            reply_markup=get_back_to_menu_keyboard(user_id),
+            parse_mode='Markdown'
+        )
         return
 
-    context.user_data['withdraw_state'] = "waiting_amount"
-    keyboard = [[InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="back_to_main_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard) # उपयोगकर्ता को वापस जाने की अनुमति देने के लिए
-    
+    context.user_data['withdraw_state'] = 'choosing_method'
+    keyboard = [
+        [InlineKeyboardButton(get_text(user_id, "withdraw_method_upi_qr"), callback_data="withdraw_method_upi_qr")],
+        [InlineKeyboardButton(get_text(user_id, "withdraw_method_redeem_code"), callback_data="withdraw_method_redeem_code")],
+        [InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="back_to_main_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await query.edit_message_text(
-        get_text(user_id, "withdraw_prompt_amount",
-                 balance=user_data['balance'],
-                 min_points=MIN_WITHDRAWAL_POINTS,
-                 min_rupees=MIN_WITHDRAWAL_POINTS * UPI_QR_BANK_POINTS_TO_RUPEES_RATE),
+        get_text(user_id, "choose_withdrawal_method"),
         reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+async def choose_withdraw_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    method = query.data.replace("withdraw_method_", "")
+    await query.answer()
+
+    context.user_data['withdraw_method'] = method
+    context.user_data['withdraw_state'] = 'entering_amount'
+
+    rate = 0
+    if method == 'upi_qr':
+        rate = UPI_QR_BANK_POINTS_TO_RUPEES_RATE
+    elif method == 'redeem_code':
+        rate = REDEEM_CODE_POINTS_TO_RUPEES_RATE
+    
+    current_balance = get_user_data(user_id)["balance"]
+    max_rupees = current_balance / rate
+
+    await query.edit_message_text(
+        get_text(user_id, "enter_withdrawal_amount",
+                 method=get_text(user_id, f"withdraw_method_{method}"),
+                 min_points=MIN_WITHDRAWAL_POINTS,
+                 current_balance=current_balance,
+                 max_rupees=max_rupees,
+                 points_per_rupee=rate),
+        reply_markup=get_back_to_menu_keyboard(user_id),
         parse_mode='Markdown'
     )
 
 async def handle_withdrawal_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
+    user_input = update.message.text
+    user_data = get_user_data(user_id)
     
-    # केवल तभी प्रोसेस करें जब waiting_amount स्थिति में हो
-    if context.user_data.get('withdraw_state') != "waiting_amount":
-        await update.message.reply_text(get_text(user_id, "command_usage"), reply_markup=get_main_menu_keyboard(user_id))
-        return
+    if context.user_data.get('withdraw_state') != 'entering_amount':
+        return # उपयोगकर्ता सही स्थिति में नहीं है
 
     try:
-        amount_points = float(update.message.text)
-        user_data = get_user_data(user_id)
-
-        if amount_points < MIN_WITHDRAWAL_POINTS:
-            await update.message.reply_text(
-                get_text(user_id, "min_withdraw_balance",
-                         balance=user_data['balance'],
-                         min_points=MIN_WITHDRAWAL_POINTS,
-                         min_rupees=MIN_WITHDRAWAL_POINTS * UPI_QR_BANK_POINTS_TO_RUPEES_RATE),
-                reply_markup=get_main_menu_keyboard(user_id),
-                parse_mode='Markdown'
-            )
-            del context.user_data['withdraw_state']
+        requested_amount_rupees = float(user_input)
+        if requested_amount_rupees <= 0:
+            await update.message.reply_text(get_text(user_id, "invalid_amount_positive"), reply_markup=get_back_to_menu_keyboard(user_id))
             return
-
-        if amount_points > user_data["balance"]:
-            await update.message.reply_text(
-                get_text(user_id, "not_enough_points", balance=user_data['balance']),
-                reply_markup=get_main_menu_keyboard(user_id),
-                parse_mode='Markdown'
-            )
-            del context.user_data['withdraw_state']
-            return
-
-        # अभी के लिए केवल पॉइंट्स स्टोर करें, बाद में विधि के आधार पर रुपये की गणना करें
-        context.user_data['withdraw_amount_points'] = amount_points
-        context.user_data['withdraw_state'] = "waiting_method"
-
-        keyboard = [
-            [InlineKeyboardButton(get_text(user_id, "upi_method_button"), callback_data="withdraw_method_upi")],
-            [InlineKeyboardButton(get_text(user_id, "qr_method_button"), callback_data="withdraw_method_qr")],
-            [InlineKeyboardButton(get_text(user_id, "bank_method_button"), callback_data="withdraw_method_bank")],
-            [InlineKeyboardButton(get_text(user_id, "redeem_method_button"), callback_data="withdraw_method_redeem")]
-        ]
-        keyboard.append([InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="start_withdraw")]) # राशि चयन पर वापस जाएँ
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        # अनुमानित रुपये रूपांतरण के साथ प्रारंभिक संदेश (डिस्प्ले के लिए UPI दर का उपयोग करके)
-        approx_rupees = amount_points * UPI_QR_BANK_POINTS_TO_RUPEES_RATE
-        await update.message.reply_text(
-            get_text(user_id, "withdraw_confirm_method",
-                     points=amount_points,
-                     rupees=approx_rupees), reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-
     except ValueError:
-        await update.message.reply_text(get_text(user_id, "invalid_amount"), reply_markup=get_main_menu_keyboard(user_id))
-        del context.user_data['withdraw_state']
-    except Exception as e:
-        logger.error(f"उपयोगकर्ता {user_id} के लिए handle_withdrawal_amount में त्रुटि: {e}")
-        await update.message.reply_text(get_text(user_id, "generic_error"), reply_markup=get_main_menu_keyboard(user_id))
-        del context.user_data['withdraw_state']
-
-async def handle_withdrawal_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-
-    if context.user_data.get('withdraw_state') != "waiting_method":
-        await query.answer(get_text(user_id, "action_not_valid"), show_alert=True)
+        await update.message.reply_text(get_text(user_id, "invalid_amount_numeric"), reply_markup=get_back_to_menu_keyboard(user_id))
         return
 
-    method = query.data.replace("withdraw_method_", "")
-    context.user_data['withdraw_method'] = method
-    context.user_data['withdraw_state'] = "waiting_details"
-
-    amount_points = context.user_data.get('withdraw_amount_points')
-    calculated_rupees = 0
-
-    if method in ["upi", "qr", "bank"]:
-        calculated_rupees = amount_points * UPI_QR_BANK_POINTS_TO_RUPEES_RATE
-    elif method == "redeem":
-        calculated_rupees = amount_points * REDEEM_CODE_POINTS_TO_RUPEES_RATE
+    method = context.user_data['withdraw_method']
+    rate = 0
+    if method == 'upi_qr':
+        rate = UPI_QR_BANK_POINTS_TO_RUPEES_RATE
+    elif method == 'redeem_code':
+        rate = REDEEM_CODE_POINTS_TO_RUPEES_RATE
     
-    context.user_data['withdraw_amount_rupees'] = calculated_rupees
+    points_needed = requested_amount_rupees * rate
+    
+    if points_needed < MIN_WITHDRAWAL_POINTS:
+        await update.message.reply_text(
+            get_text(user_id, "withdrawal_below_min", min_points=MIN_WITHDRAWAL_POINTS),
+            reply_markup=get_back_to_menu_keyboard(user_id)
+        )
+        return
 
-    await query.answer()
+    if user_data["balance"] < points_needed:
+        await update.message.reply_text(
+            get_text(user_id, "insufficient_points_for_withdrawal", requested_points=int(points_needed), current_balance=user_data["balance"]),
+            reply_markup=get_back_to_menu_keyboard(user_id),
+            parse_mode='Markdown'
+        )
+        return
 
-    keyboard = [[InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="start_withdraw")]] # विधि चयन पर वापस जाएँ
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    context.user_data['withdraw_amount_rupees'] = requested_amount_rupees
+    context.user_data['withdraw_amount_points'] = int(points_needed)
+    context.user_data['withdraw_state'] = 'entering_details'
 
-    if method == "upi":
-        await query.edit_message_text(get_text(user_id, "upi_prompt"), reply_markup=reply_markup, parse_mode='Markdown')
-    elif method == "qr":
-        await query.edit_message_text(get_text(user_id, "qr_prompt"), reply_markup=reply_markup, parse_mode='Markdown')
-    elif method == "bank":
-        await query.edit_message_text(get_text(user_id, "bank_prompt"), reply_markup=reply_markup, parse_mode='Markdown')
-    elif method == "redeem":
-        await query.edit_message_text(get_text(user_id, "redeem_prompt"), reply_markup=reply_markup, parse_mode='Markdown')
+    if method == 'upi_qr':
+        prompt_message = get_text(user_id, "enter_upi_id")
+    elif method == 'redeem_code':
+        prompt_message = get_text(user_id, "enter_redeem_details")
     else:
-        await query.edit_message_text(get_text(user_id, "invalid_method"), reply_markup=get_main_menu_keyboard(user_id))
-        del context.user_data['withdraw_state']
+        prompt_message = get_text(user_id, "generic_error") # अमान्य विधि
+
+    await update.message.reply_text(prompt_message, reply_markup=get_back_to_menu_keyboard(user_id), parse_mode='Markdown')
 
 async def handle_withdrawal_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-
-    if context.user_data.get('withdraw_state') != "waiting_details":
-        await update.message.reply_text(get_text(user_id, "command_usage"), reply_markup=get_main_menu_keyboard(user_id))
-        return
-
     details = update.message.text
-    qr_photo_file_id = None
+    user_data = get_user_data(user_id)
 
-    if update.message.photo: # यदि उपयोगकर्ता ने QR विधि के लिए एक फोटो भेजी है
-        if context.user_data.get('withdraw_method') == "qr":
-            qr_photo_file_id = update.message.photo[-1].file_id # सबसे बड़ी फोटो प्राप्त करें
-            details = "QR कोड इमेज (संलग्न देखें)" # QR के लिए टेक्स्ट विवरण ओवरराइड करें
+    if context.user_data.get('withdraw_state') != 'entering_details':
+        return # उपयोगकर्ता सही स्थिति में नहीं है
 
+    method = context.user_data.get('withdraw_method')
     amount_points = context.user_data.get('withdraw_amount_points')
     amount_rupees = context.user_data.get('withdraw_amount_rupees')
-    method = context.user_data.get('withdraw_method')
 
-    if amount_points is None or method is None:
-        logger.error(f"उपयोगकर्ता {user_id} के लिए निकासी डेटा गायब। स्थिति संभवतः असंगत है।")
-        await update.message.reply_text(get_text(user_id, "withdrawal_error"), reply_markup=get_main_menu_keyboard(user_id))
-        del context.user_data['withdraw_state']
+    if not method or amount_points is None or amount_rupees is None:
+        await update.message.reply_text(get_text(user_id, "withdrawal_state_error"), reply_markup=get_main_menu_keyboard(user_id))
+        context.user_data.pop('withdraw_state', None) # स्थिति साफ़ करें
         return
 
-    # पुन: सबमिशन को रोकने के लिए पहले स्थिति साफ़ करें
+    # डेटाबेस में निकासी अनुरोध रिकॉर्ड करें
+    request_id = record_withdrawal_request(
+        user_id=user_id,
+        username=update.effective_user.username,
+        amount_points=amount_points,
+        amount_rupees=amount_rupees,
+        method=method,
+        details=details
+    )
+
+    # उपयोगकर्ता के बैलेंस से पॉइंट्स घटाएँ
+    update_user_data(user_id, balance_change=-amount_points)
+
+    await update.message.reply_text(
+        get_text(user_id, "withdrawal_success", amount_points=amount_points, amount_rupees=amount_rupees, method=get_text(user_id, f"withdraw_method_{method}")),
+        reply_markup=get_main_menu_keyboard(user_id),
+        parse_mode='Markdown'
+    )
+
+    # एडमिन चैनल पर सूचना भेजें
+    admin_message = get_text("en", "admin_withdrawal_notification", # एडमिन अधिसूचना के लिए डिफ़ॉल्ट भाषा
+                             user_id=user_id,
+                             username=update.effective_user.username,
+                             amount_points=amount_points,
+                             amount_rupees=amount_rupees,
+                             method=method,
+                             details=details,
+                             request_id=str(request_id))
+
+    keyboard = [
+        [InlineKeyboardButton("✅ स्वीकृत करें", callback_data=f"approve_withdrawal_{request_id}")],
+        [InlineKeyboardButton("❌ अस्वीकृत करें", callback_data=f"reject_withdrawal_{request_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_WITHDRAWAL_CHANNEL_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"एडमिन चैनल पर निकासी सूचना भेजने में विफल: {e}")
+
+    # उपयोगकर्ता की स्थिति साफ़ करें
     context.user_data.pop('withdraw_state', None)
     context.user_data.pop('withdraw_amount_points', None)
     context.user_data.pop('withdraw_amount_rupees', None)
     context.user_data.pop('withdraw_method', None)
 
-    # उपयोगकर्ता के बैलेंस से पॉइंट्स काट लें
-    update_user_data(user_id, balance_change=-amount_points)
-    user_data = get_user_data(user_id) # अपडेटेड बैलेंस प्राप्त करें
+# --- एडमिन हैंडलर ---
+async def admin_approve_reject_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    data = query.data
+    await query.answer()
 
-    # निकासी अनुरोध रिकॉर्ड करें और ObjectId प्राप्त करें
-    withdrawal_doc_id = record_withdrawal_request(user_id, amount_points, amount_rupees, method, details, qr_photo_file_id)
+    # सुनिश्चित करें कि केवल एडमिन ही इन बटनों का उपयोग कर सकते हैं
+    # यह सिर्फ एक बुनियादी जांच है; एक वास्तविक बॉट में बेहतर एडमिन सत्यापन हो सकता है।
+    if str(user_id) not in os.getenv("ADMIN_USER_IDS", "").split(','):
+        await query.answer("आपको इस कार्रवाई को करने की अनुमति नहीं है।", show_alert=True)
+        return
 
-    await update.message.reply_text(
-        get_text(user_id, "withdrawal_success",
-                 points=amount_points,
-                 rupees=amount_rupees,
-                 method=method.upper(),
-                 details=details,
-                 balance=user_data['balance']),
-        reply_markup=get_main_menu_keyboard(user_id),
+    parts = data.split('_')
+    action = parts[0] # 'approve' या 'reject'
+    request_id = parts[2] # ObjectId का स्ट्रिंग
+
+    withdrawal_request = withdrawal_requests_collection.find_one({"_id": ObjectId(request_id)})
+
+    if not withdrawal_request:
+        await query.edit_message_text(query.message.text + "\n\n❌ अनुरोध नहीं मिला।", parse_mode='Markdown')
+        return
+
+    if withdrawal_request.get('status') != 'pending':
+        await query.edit_message_text(query.message.text + f"\n\n⚠️ यह अनुरोध पहले ही *{withdrawal_request['status']}* हो चुका है।", parse_mode='Markdown')
+        return
+
+    requester_user_id = withdrawal_request['user_id']
+    amount_points = withdrawal_request['amount_points']
+    
+    new_status = ""
+    admin_action_text = ""
+    user_notification_key = ""
+
+    if action == "approve":
+        new_status = "approved"
+        admin_action_text = "✅ स्वीकृत किया गया"
+        user_notification_key = "withdrawal_approved_message"
+        # बैलेंस से पॉइंट्स काटने की आवश्यकता नहीं है, क्योंकि यह पहले ही 'handle_withdrawal_details' में घटा दिए गए हैं।
+    elif action == "reject":
+        new_status = "rejected"
+        admin_action_text = "❌ अस्वीकृत किया गया"
+        user_notification_key = "withdrawal_rejected_message"
+        # पॉइंट्स को उपयोगकर्ता के बैलेंस में वापस जोड़ें
+        update_user_data(requester_user_id, balance_change=amount_points)
+        user_data_after_refund = get_user_data(requester_user_id)
+        logger.info(f"उपयोगकर्ता {requester_user_id} को अस्वीकृत निकासी के लिए {amount_points} अंक वापस किए गए।")
+    else:
+        await query.answer("अमान्य कार्रवाई।", show_alert=True)
+        return
+
+    update_withdrawal_request_status(request_id, new_status, user_id) # admin_id को रिकॉर्ड करें
+
+    # एडमिन के लिए संदेश संपादित करें
+    await query.edit_message_text(
+        query.message.text + f"\n\n`{query.from_user.first_name}` द्वारा *{new_status.upper()}*",
         parse_mode='Markdown'
     )
 
-    # --- एडमिन चैनल पर बटनों के साथ नोटिफिकेशन भेजें ---
-    try:
-        user_info = await context.bot.get_chat(user_id)
-        user_name = user_info.first_name
-        user_username = user_info.username
-
-        notification_text = (
-            "💰 *नई विथड्रॉल रिक्वेस्ट!* 💰\n\n"
-            f"**यूज़र ID:** `{user_id}`\n"
-            f"**नाम:** {user_name}" + (f" (@{user_username})" if user_username else "") + "\n"
-            f"**रिक्वेस्टेड पॉइंट्स:** `{amount_points:.2f}`\n"
-            f"**अनुमानित रुपये:** `{amount_rupees:.2f} रुपये`\n"
-            f"**विधि:** `{method.upper()}`\n"
-            f"**विवरण:** `{details}`\n\n"
-            f"**रिक्वेस्ट ID:** `{withdrawal_doc_id}`" # MongoDB ObjectId शामिल करें
-        )
-
-        approval_keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(get_text(ADMIN_WITHDRAWAL_CHANNEL_ID, "approve_button"), callback_data=f"withdraw_approve_{withdrawal_doc_id}"),
-                InlineKeyboardButton(get_text(ADMIN_WITHDRAWAL_CHANNEL_ID, "reject_button"), callback_data=f"withdraw_reject_{withdrawal_doc_id}")
-            ]
-        ])
-        
-        if qr_photo_file_id and method == "qr":
-            admin_message = await context.bot.send_photo(
-                chat_id=ADMIN_WITHDRAWAL_CHANNEL_ID,
-                photo=qr_photo_file_id,
-                caption=notification_text,
-                reply_markup=approval_keyboard,
-                parse_mode='Markdown'
+    # उपयोगकर्ता को सूचित करें
+    user_language = get_user_language(requester_user_id)
+    notification_message = WITHDRAWAL_STATUS_UPDATE_MESSAGES.get(user_language, {}).get(user_notification_key, "")
+    if notification_message:
+        try:
+            await context.bot.send_message(
+                chat_id=requester_user_id,
+                text=notification_message.format(
+                    amount_points=amount_points,
+                    amount_rupees=withdrawal_request['amount_rupees'],
+                    method=get_text(user_language, f"withdraw_method_{withdrawal_request['method']}"),
+                    details=withdrawal_request['details'],
+                    current_balance=user_data_after_refund["balance"] if action == "reject" else get_user_data(requester_user_id)["balance"]
+                ),
+                parse_mode='Markdown',
+                reply_markup=get_main_menu_keyboard(requester_user_id)
             )
-        else:
-            admin_message = await context.bot.send_message(
-                chat_id=ADMIN_WITHDRAWAL_CHANNEL_ID,
-                text=notification_text,
-                reply_markup=approval_keyboard,
-                parse_mode='Markdown'
-            )
-        
-        # बाद के अपडेट के लिए निकासी अनुरोध में एडमिन मैसेज ID स्टोर करें
-        withdrawal_requests_collection.update_one(
-            {"_id": withdrawal_doc_id},
-            {"$set": {
-                "admin_channel_message_id": admin_message.message_id,
-                "admin_channel_chat_id": admin_message.chat_id
-            }}
-        )
+        except Exception as e:
+            logger.error(f"उपयोगकर्ता {requester_user_id} को निकासी स्थिति संदेश भेजने में विफल: {e}")
+    else:
+        logger.warning(f"उपयोगकर्ता {requester_user_id} के लिए निकासी स्थिति संदेश कुंजी '{user_notification_key}' नहीं मिली।")
 
-    except Exception as e:
-        logger.error(f"उपयोगकर्ता {user_id} के लिए एडमिन चैनल पर निकासी सूचना भेजने में त्रुटि: {e}")
-
-async def handle_admin_withdrawal_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    admin_id = query.from_user.id
-    data = query.data.split('_')
-    action = data[1] # 'approve' या 'reject'
-    request_id_str = data[2]
-    
-    await query.answer()
-
-    try:
-        request_id = ObjectId(request_id_str)
-        withdrawal_request = withdrawal_requests_collection.find_one({"_id": request_id})
-
-        if not withdrawal_request:
-            await query.edit_message_text("❌ निकासी अनुरोध नहीं मिला।", reply_markup=None)
-            return
-
-        if withdrawal_request["status"] != "pending":
-            await query.answer(get_text(admin_id, "already_processed"), show_alert=True)
-            return
-
-        user_id_to_notify = withdrawal_request["user_id"]
-        points = withdrawal_request["amount_points"]
-        rupees = withdrawal_request["amount_rupees"]
-
-        if action == "approve":
-            update_withdrawal_request_status(request_id, "approved", admin_id, query.message.message_id, query.message.chat_id)
-            user_message = get_text(user_id_to_notify, "approved", points=points, rupees=rupees)
-            new_admin_text = query.message.text + "\n\n*✅ एडमिन द्वारा स्वीकृत!*"
-            await context.bot.send_message(chat_id=user_id_to_notify, text=user_message, parse_mode='Markdown')
-
-        elif action == "reject":
-            # उपयोगकर्ता को पॉइंट्स वापस करें
-            update_user_data(user_id_to_notify, balance_change=points)
-            update_withdrawal_request_status(request_id, "rejected", admin_id, query.message.message_id, query.message.chat_id)
-            user_message = get_text(user_id_to_notify, "rejected", points=points, rupees=rupees)
-            new_admin_text = query.message.text + "\n\n*❌ एडमिन द्वारा अस्वीकृत! (पॉइंट्स वापस कर दिए गए)*"
-            await context.bot.send_message(chat_id=user_id_to_notify, text=user_message, parse_mode='Markdown')
-        
-        # एडमिन संदेश को अपडेट करें ताकि यह दिखाया जा सके कि इसे संसाधित किया गया है और बटन हटा दिए गए हैं
-        if withdrawal_request["qr_photo_file_id"]: # यदि यह एक फोटो संदेश था
-             await query.edit_message_caption(caption=new_admin_text, reply_markup=None, parse_mode='Markdown')
-        else:
-             await query.edit_message_text(text=new_admin_text, reply_markup=None, parse_mode='Markdown')
-
-    except Exception as e:
-        logger.error(f"अनुरोध {request_id_str} के लिए एडमिन निकासी कार्रवाई {action} को हैंडल करने में त्रुटि: {e}")
-        await query.edit_message_text(f"एक त्रुटि हुई: {e}", reply_markup=None)
-
-
-# --- सहायता कमांड ---
+# --- सहायता संदेश ---
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     await query.answer()
 
-    message_text = get_text(user_id, "help_text",
-                            min_points=MIN_WITHDRAWAL_POINTS,
-                            min_rupees=MIN_WITHDRAWAL_POINTS * UPI_QR_BANK_POINTS_TO_RUPEES_RATE,
-                            upi_qr_bank_rate=UPI_QR_BANK_POINTS_TO_RUPEES_RATE,
-                            redeem_rate=REDEEM_CODE_POINTS_TO_RUPEES_RATE)
-    
-    keyboard = [[InlineKeyboardButton(get_text(user_id, "back_to_menu"), callback_data="back_to_main_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    help_text = get_text(user_id, "help_text")
+    await query.edit_message_text(help_text, reply_markup=get_back_to_menu_keyboard(user_id), parse_mode='Markdown')
 
-    await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+# --- अप्रत्याशित संदेश हैंडलर ---
+async def handle_unrecognized_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    # यदि उपयोगकर्ता किसी विशिष्ट स्थिति में नहीं है, तो उसे मुख्य मेनू पर रीडायरेक्ट करें
+    if 'withdraw_state' not in context.user_data and 'waiting_for_language' not in context.user_data:
+        await update.message.reply_text(get_text(user_id, "unrecognized_command"), reply_markup=get_main_menu_keyboard(user_id), parse_mode='Markdown')
+    # यदि वे किसी स्थिति में हैं (जैसे निकासी), तो उन्हें एक उपयुक्त संकेत दें
+    elif context.user_data.get('withdraw_state') == 'entering_amount':
+        await handle_withdrawal_amount(update, context) # इसे फिर से प्रोसेस करने की कोशिश करें
+    elif context.user_data.get('withdraw_state') == 'entering_details':
+        await handle_withdrawal_details(update, context) # इसे फिर से प्रोसेस करने की कोशिश करें
+    else:
+        # किसी भी अन्य अज्ञात स्थिति के लिए, मुख्य मेनू पर वापस जाएँ
+        await update.message.reply_text(get_text(user_id, "unrecognized_command"), reply_markup=get_main_menu_keyboard(user_id), parse_mode='Markdown')
 
+# --- HTTP सर्वर को अलग थ्रेड में चलाने के लिए फ़ंक्शन ---
+def run_webhook_server(host='0.0.0.0', port=int(os.environ.get("PORT", 8000))):
+    server_address = (host, port)
+    # वेबहुक हैंडलर के लिए पाथ मैपिंग को समायोजित करें यदि आवश्यक हो
+    # वर्तमान में यह 'webhook' पथ पर सभी GET/POST अनुरोधों को मानता है
+    httpd = HTTPServer(server_address, ShortlinkWebhookHandler)
+    logger.info(f"Webhook सर्वर {host}:{port} पर चल रहा है...")
+    httpd.serve_forever()
 
-# --- त्रुटि हैंडलर ---
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(f"त्रुटि: {context.error} अद्यतन {update} के कारण हुई")
-    user_id = update.effective_user.id if update.effective_user else None
-    if user_id:
-        await context.bot.send_message(chat_id=user_id, text=get_text(user_id, "generic_error"), reply_markup=get_main_menu_keyboard(user_id))
-
-# --- बॉट चलाने के लिए मुख्य फ़ंक्शन ---
+# --- मुख्य फ़ंक्शन ---
 def main():
     global application_instance
-    init_db() # MongoDB कनेक्शन इनिशियलाइज़ करें
+    
+    # डेटाबेस को इनिशियलाइज़ करें
+    init_db()
 
+    # Telegram बॉट एप्लिकेशन बिल्डर
     application = Application.builder().token(BOT_TOKEN).build()
-    application_instance = application # इंस्टेंस को ग्लोबली स्टोर करें
+    application_instance = application # ग्लोबल वेरिएबल असाइन करें
 
-    # --- हैंडलर ---
-    # कमांड्स
+    # कमांड हैंडलर
     application.add_handler(CommandHandler("start", start))
 
-    # कॉलबैक क्वेरीज़
-    application.add_handler(CallbackQueryHandler(handle_force_subscribe_check_callback, pattern="^check_force_subscribe$"))
-    application.add_handler(CallbackQueryHandler(set_language, pattern="^set_lang_"))
+    # कॉलबैक क्वेरी हैंडलर
+    application.add_handler(CallbackQueryHandler(set_language, pattern=r"^set_lang_"))
+    application.add_handler(CallbackQueryHandler(check_force_subscribe, pattern="^check_force_subscribe$"))
     application.add_handler(CallbackQueryHandler(back_to_main_menu, pattern="^back_to_main_menu$"))
-
     application.add_handler(CallbackQueryHandler(show_earn_points_menu, pattern="^earn_points_menu$"))
     application.add_handler(CallbackQueryHandler(earn_shortlinks, pattern="^earn_shortlinks$"))
     application.add_handler(CallbackQueryHandler(done_shortlink, pattern="^done_shortlink$"))
     application.add_handler(CallbackQueryHandler(earn_join_channels, pattern="^earn_join_channels$"))
-    application.add_handler(CallbackQueryHandler(claim_channel_points, pattern="^claim_channel_"))
-    
+    application.add_handler(CallbackQueryHandler(claim_channel_points, pattern=r"^claim_channel_"))
     application.add_handler(CallbackQueryHandler(show_profile, pattern="^show_profile$"))
     application.add_handler(CallbackQueryHandler(show_invite, pattern="^show_invite$"))
+    application.add_handler(CallbackQueryHandler(start_withdraw, pattern="^start_withdraw$"))
+    application.add_handler(CallbackQueryHandler(choose_withdraw_method, pattern=r"^withdraw_method_"))
+    application.add_handler(CallbackQueryHandler(admin_approve_reject_withdrawal, pattern=r"^(approve|reject)_withdrawal_"))
     application.add_handler(CallbackQueryHandler(show_help, pattern="^show_help$"))
 
-    application.add_handler(CallbackQueryHandler(start_withdraw, pattern="^start_withdraw$"))
-    application.add_handler(CallbackQueryHandler(handle_withdrawal_method, pattern="^withdraw_method_"))
-    application.add_handler(CallbackQueryHandler(handle_admin_withdrawal_action, pattern="^withdraw_approve_"))
-    application.add_handler(CallbackQueryHandler(handle_admin_withdrawal_action, pattern="^withdraw_reject_"))
+    # नियमित संदेश हैंडलर (निकासी विवरण के लिए)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unrecognized_message))
 
-    # मैसेज हैंडलर (निकासी राशि, विवरण या QR फोटो जैसे टेक्स्ट इनपुट के लिए)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_withdrawal_amount, block=False)) # निकासी राशि के लिए पहले जांच करें
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_withdrawal_details, block=False)) # निकासी विवरण के लिए जांच करें
-    application.add_handler(MessageHandler(filters.PHOTO, handle_withdrawal_details, block=False)) # QR कोड फोटो के लिए
-
-    # त्रुटि हैंडलर
-    application.add_error_handler(error_handler)
-
-    # --- वेबहुक सर्वर शुरू करें ---
-    # स्थानीय परीक्षण के लिए, आप पोलिंग का उपयोग कर सकते हैं: application.run_polling(poll_interval=3)
-    # Koyeb डिप्लॉयमेंट के लिए, वेबहुक का उपयोग करें:
-    
-    # पोर्ट परिभाषित करें Koyeb उजागर करेगा
-    port = int(os.environ.get("PORT", "8000")) # Koyeb PORT पर्यावरण चर का उपयोग करता है
-
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path="/webhook", # यह WEBHOOK_URL में पथ से मेल खाना चाहिए
-        webhook_url=WEBHOOK_URL # आपका Koyeb ऐप URL
-    )
-
-    # शॉर्टलिंक वेबहुक के लिए HTTP सर्वर को एक अलग थ्रेड में शुरू करें
-    # यह एक बुनियादी उदाहरण है; उत्पादन के लिए, आप एक समर्पित वेब फ्रेमवर्क जैसे Flask/FastAPI
-    # के साथ एक अधिक मजबूत सेटअप चाह सकते हैं जो वेबहुक को हैंडल करता है।
-    http_server = HTTPServer(('0.0.0.0', port), ShortlinkWebhookHandler)
-    webhook_thread = threading.Thread(target=http_server.serve_forever)
-    webhook_thread.daemon = True # मुख्य प्रोग्राम को थ्रेड चलने पर भी बाहर निकलने की अनुमति दें
+    # वेबहुक सर्वर को अलग थ्रेड में चलाएँ
+    webhook_thread = threading.Thread(target=run_webhook_server)
+    webhook_thread.daemon = True # मुख्य कार्यक्रम समाप्त होने पर थ्रेड को समाप्त करें
     webhook_thread.start()
-    logger.info(f"शॉर्टलिंक वेबहुक सर्वर पोर्ट {port}/webhook पर सुन रहा है")
 
+    # बॉट को पोलिंग मोड में चलाएँ (यदि वेबहुक का उपयोग नहीं कर रहे हैं, लेकिन Koyeb पर आपको वेबहुक का उपयोग करना चाहिए)
+    # यदि आप Telegram के वेबहुक को Koyeb पर सेट कर रहे हैं, तो पोलिंग की आवश्यकता नहीं होगी।
+    # इसके बजाय, आप Telegram को अपने Koyeb ऐप के Webhook URL पर अपडेट भेजने के लिए कहेंगे।
+
+    # Koyeb के लिए Webhook सेटअप
+    # WEBHOOK_URL को config.py में आपकी Koyeb ऐप URL पर सेट किया जाना चाहिए।
+    # उदाहरण: https://rotten-barbette-asmwasearchbot-64f1c2e9.koyeb.app/
+    # Telegram को अपडेट भेजने के लिए Webhook_url/bot_token पर सेट करना होगा
+    # https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WEBHOOK_URL>
+    
+    # हम यहां सीधे वेबहुक सेट नहीं कर रहे हैं क्योंकि Koyeb को इसे अपने आप करना चाहिए
+    # या आप इसे मैन्युअल रूप से एक बार कर सकते हैं।
+    
+    # यह सुनिश्चित करने के लिए कि आपका bot.py चलता रहे और Koyeb के HTTP सर्वर को बाधित न करे,
+    # हम `idle()` का उपयोग करते हैं। Koyeb के Webhook सिस्टम के साथ,
+    # आपका बॉट `run_polling()` के बिना भी प्रतिक्रिया देना जारी रखना चाहिए
+    # बशर्ते Telegram को आपके Webhook URL पर अपडेट भेजे जा रहे हों।
+    
+    # हालांकि, Telegram.ext.Application को लगातार चलने की आवश्यकता है।
+    # Koyeb पर, यदि आप `run_webhook()` का उपयोग कर रहे हैं (जैसा कि यह कोड में है),
+    # तो यह एक इंटरनल सर्वर चलाता है और आपके `HTTPServer` के साथ संघर्ष कर सकता है।
+    # सबसे अच्छा Koyeb डिप्लॉयमेंट के लिए, आमतौर पर आप या तो:
+    # 1. Koyeb के बिल्ट-इन वेबहुक को Telegram.ext के साथ उपयोग करें (जो एक आंतरिक सर्वर चलाता है)
+    # 2. या एक कस्टम HTTP सर्वर चलाएं (जैसे `ShortlinkWebhookHandler`) और फिर Telegram.ext को पोलिंग पर चलाएं।
+
+    # चूंकि हमने एक कस्टम HTTP सर्वर (`ShortlinkWebhookHandler`) बनाया है
+    # जो पोर्ट 8000 पर शॉर्टलिंक कॉलबैक के लिए सुनता है,
+    # तो हम Telegram बॉट को अपडेट प्राप्त करने के लिए `run_polling()` पर चला सकते हैं।
+    # ध्यान दें: यह Koyeb पर दो सर्वरों को एक ही पोर्ट पर चलाने की कोशिश कर सकता है
+    # यदि Koyeb स्वतः ही `run_webhook()` चला रहा है।
+    # सबसे सरल Koyeb सेटअप के लिए, `run_polling()` या `run_webhook()` में से केवल एक का उपयोग करें,
+    # और यदि `ShortlinkWebhookHandler` को शॉर्टलिंक के लिए एक अलग पोर्ट की आवश्यकता है,
+    # तो Koyeb डिप्लॉयमेंट कॉन्फ़िगरेशन में इसे अलग से परिभाषित करें।
+    
+    # सुरक्षित पक्ष पर, बॉट को चलने दें और `ShortlinkWebhookHandler` को एक अलग थ्रेड में चलाएं।
+    # Koyeb पर्यावरण में यह अक्सर सर्वोत्तम तरीका होता है जब आपको एक कस्टम HTTP सर्वर की आवश्यकता होती है।
+
+    # मुख्य बॉट एप्लिकेशन को चलाएं
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
