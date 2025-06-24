@@ -31,7 +31,7 @@ from languages import LANGUAGES, WITHDRAWAL_STATUS_UPDATE_MESSAGES, DEFAULT_LANG
 from database_utils import (
     init_db, get_user_data, update_user_data, record_withdrawal_request,
     set_user_language, withdrawal_requests_collection, users_collection,
-    get_user_language, update_withdrawal_request_status...
+    get_user_language, update_withdrawal_request_status
 )
 
 # --- लॉगिंग कॉन्फ़िगर करें ---
