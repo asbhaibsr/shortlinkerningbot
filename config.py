@@ -36,7 +36,7 @@ MONGO_URI = "mongodb+srv://xonide3955:U9C9hrp7yABlbUeq@cluster0.nscd3zg.mongodb.
 DB_NAME = "your_shortlink_bot_db"
 
 # Koyeb डिप्लॉयमेंट के लिए वेबहुक कॉन्फ़िगरेशन
-WEBHOOK_URL = "https://rotten-barbette-asmwasearchbot-64f1c2e9.koyeb.app/webhook"
+# WEBHOOK_URL = "https://rotten-barbette-asmwasearchbot-64f1c2e9.koyeb.app/webhook"
 
 # बॉट के लिए डिफ़ॉल्ट भाषा सेटिंग
 DEFAULT_LANGUAGE = "en"
