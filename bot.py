@@ -24,7 +24,8 @@ from config import (
     FORCE_SUBSCRIBE_CHANNEL_ID, FORCE_SUBSCRIBE_CHANNEL_USERNAME, JOIN_TO_EARN_CHANNELS,
     WEBHOOK_URL # वेबहुक सेट करने के लिए
 )
-from languages import LANGUAGES, WITHDRAWAL_STATUS_UPDATE_MESSAGES, DEFAULT_LANGUAGE, get_text
+# यहां से WITHDRAWAL_STATUS_UPDATE_MESSAGES को हटाया गया है
+from languages import LANGUAGES, DEFAULT_LANGUAGE, get_text 
 from database_utils import (
     init_db, get_user_data, update_user_data, record_withdrawal_request,
     set_user_language, withdrawal_requests_collection, users_collection,
