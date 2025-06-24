@@ -1,9 +1,7 @@
-# bot.py
-
 import random
 import requests
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, ReplyKeyboardRemove # ReplyKeyboardRemove जोड़ा
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 )
@@ -14,16 +12,12 @@ import asyncio
 import os
 from pymongo.errors import WriteError
 
-# Flask को इम्पोर्ट करें
-from flask import Flask, request
-
 # आपकी कस्टम इम्पोर्ट्स (सुनिश्चित करें कि config.py में सभी आवश्यक वेरिएबल्स हैं)
 from config import (
     BOT_TOKEN, ADMIN_WITHDRAWAL_CHANNEL_ID, SHORTLINK_API_URL, SHORTLINK_API_KEY,
     POINTS_PER_SHORTLINK, REFERRAL_POINTS_PER_REFERRAL, POINTS_PER_CHANNEL_JOIN,
     MIN_WITHDRAWAL_POINTS, UPI_QR_BANK_POINTS_TO_RUPEES_RATE, REDEEM_CODE_POINTS_TO_RUPEES_RATE,
     FORCE_SUBSCRIBE_CHANNEL_ID, FORCE_SUBSCRIBE_CHANNEL_USERNAME, JOIN_TO_EARN_CHANNELS,
-    WEBHOOK_URL # वेबहुक सेट करने के लिए
 )
 from languages import LANGUAGES, DEFAULT_LANGUAGE, get_text
 from database_utils import (
@@ -63,12 +57,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user_name = update.effective_user.first_name
     user_lang = get_user_language(user_id) # उपयोगकर्ता की मौजूदा भाषा प्राप्त करें
 
-    # *** यहाँ ReplyKeyboardRemove जोड़ा गया है ***
-    # यह सुनिश्चित करता है कि कोई भी पुराना ReplyKeyboard हटा दिया जाए।
-    # आप इसे हर /start पर भेज सकते हैं, या केवल एक बार यदि आप चाहें।
+    # ReplyKeyboardRemove भेजें ताकि कोई भी पुराना ReplyKeyboard हटा दिया जाए।
     await update.message.reply_text(get_text("welcome_message_initial", user_lang), reply_markup=ReplyKeyboardRemove())
-    # Note: "welcome_message_initial" के लिए अपनी languages.py में एक टेक्स्ट जोड़ें, 
-    # या आप इसे खाली स्ट्रिंग "" भी रख सकते हैं।
 
     # 1. चैनल सदस्यता की जांच करें
     if not await is_user_subscribed(user_id, context.bot):
@@ -80,7 +70,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 InlineKeyboardButton(get_text("force_subscribe_check_button", user_lang), callback_data="check_subscription")
             ]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            # यहाँ reply_text का उपयोग किया गया है
             await update.message.reply_text(text, reply_markup=reply_markup, disable_web_page_preview=True)
         else:
             await update.message.reply_text(get_text("force_subscribe_error_no_username", user_lang))
@@ -208,7 +197,7 @@ async def change_language_option_callback(update: Update, context: ContextTypes.
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text, reply_markup=reply_markup)
 
-# --- कमांड हैंडलर: /help कमांड (यह पहले से आपके पास हो सकता है) ---
+# --- कमांड हैंडलर: /help कमांड ---
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = str(update.effective_user.id)
     user_lang = get_user_language(user_id)
@@ -244,8 +233,8 @@ async def earn_points_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             text_message = get_text("earn_points_instructions", user_lang).format(shortlink_url=generated_shortlink)
             
             keyboard = [[
-                InlineKeyboardButton(get_text("button_visit_shortlink", user_lang), url=generated_shortlink), # यहाँ URL जोड़ा है
-                InlineKeyboardButton(get_text("button_check_completion_status", user_lang), callback_data=f"check_shortlink_{user_id}") # एक नया बटन जोड़ा है
+                InlineKeyboardButton(get_text("button_visit_shortlink", user_lang), url=generated_shortlink),
+                InlineKeyboardButton(get_text("button_check_completion_status", user_lang), callback_data=f"check_shortlink_{user_id}")
             ]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -335,10 +324,7 @@ async def withdraw_points_callback(update: Update, context: ContextTypes.DEFAULT
     await query.edit_message_text(get_text("withdraw_message", user_lang))
 
 
-# --- Flask एप्लिकेशन सेटअप ---
-
-app = Flask(__name__)
-
+# Telegram हैंडलर जोड़ें
 application.add_handler(CommandHandler("start", start_command))
 application.add_handler(CommandHandler("help", help_command))
 
@@ -353,41 +339,24 @@ application.add_handler(CallbackQueryHandler(refer_friend_callback, pattern="^re
 application.add_handler(CallbackQueryHandler(check_balance_callback, pattern="^check_balance$"))
 application.add_handler(CallbackQueryHandler(withdraw_points_callback, pattern="^withdraw_points$"))
 
-try:
-    async def initialize_and_set_webhook():
-        await application.initialize()
-        full_webhook_url = f"{WEBHOOK_URL}/webhook/{BOT_TOKEN}"
-        try:
-            current_webhook_info = await application.bot.get_webhook_info()
-            if current_webhook_info.url != full_webhook_url:
-                await application.bot.set_webhook(url=full_webhook_url)
-                logger.info(f"Telegram webhook set to: {full_webhook_url}")
-            else:
-                logger.info(f"Telegram webhook already set to: {full_webhook_url}")
-        except Exception as e:
-            logger.error(f"Failed to set Telegram webhook: {e}", exc_info=True)
-        
-        await application.start()
-        logger.info("Telegram Application initialized and started (webhook mode).")
 
-    asyncio.run(initialize_and_set_webhook())
-
-except Exception as e:
-    logger.critical(f"FATAL ERROR during initial Telegram Application setup: {e}", exc_info=True)
-    raise e
-
-@app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
-async def telegram_webhook():
-    """Handle incoming Telegram updates via webhook."""
+# बॉट को पोलिंग मोड में चलाएं
+def main() -> None:
+    logger.info("Starting bot in polling mode...")
+    # Polling शुरू करने से पहले किसी भी मौजूदा वेबहुक को हटा दें
     try:
-        update_json = request.get_json(force=True)
-        update = Update.de_json(update_json, application.bot)
-        asyncio.create_task(application.process_update(update))
-        return "ok"
+        current_webhook_info = asyncio.run(application.bot.get_webhook_info())
+        if current_webhook_info.url:
+            asyncio.run(application.bot.delete_webhook())
+            logger.info("Existing webhook deleted.")
     except Exception as e:
-        logger.error(f"Error processing Telegram update: {e}", exc_info=True)
-        return "error", 500
+        logger.warning(f"Could not delete webhook (might not exist): {e}")
+
+    # drop_pending_updates=True पुराने अपडेट को छोड़ देता है, जिससे बॉट तुरंत प्रतिक्रिया देता है
+    # poll_interval को कम किया जा सकता है लेकिन बहुत कम करने से API लिमिट हो सकती है
+    application.run_polling(poll_interval=0.5, timeout=30, drop_pending_updates=True) 
+    # timeout: यह निर्धारित करता है कि Telegram API कितनी देर तक नए अपडेट के लिए इंतजार करेगा
+    # poll_interval: यह run_polling() के अंदर पोलिंग के बीच विलंब है
 
 if __name__ == "__main__":
-    logger.info("Running Flask app in development mode.")
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    main()
