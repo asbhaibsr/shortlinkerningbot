@@ -3,7 +3,7 @@
 import random
 import requests
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, ReplyKeyboardRemove # ReplyKeyboardRemove जोड़ा
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 )
@@ -12,6 +12,7 @@ from bson.objectid import ObjectId
 import json
 import asyncio
 import os
+from pymongo.errors import WriteError
 
 # Flask को इम्पोर्ट करें
 from flask import Flask, request
@@ -62,6 +63,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user_name = update.effective_user.first_name
     user_lang = get_user_language(user_id) # उपयोगकर्ता की मौजूदा भाषा प्राप्त करें
 
+    # *** यहाँ ReplyKeyboardRemove जोड़ा गया है ***
+    # यह सुनिश्चित करता है कि कोई भी पुराना ReplyKeyboard हटा दिया जाए।
+    # आप इसे हर /start पर भेज सकते हैं, या केवल एक बार यदि आप चाहें।
+    await update.message.reply_text(get_text("welcome_message_initial", user_lang), reply_markup=ReplyKeyboardRemove())
+    # Note: "welcome_message_initial" के लिए अपनी languages.py में एक टेक्स्ट जोड़ें, 
+    # या आप इसे खाली स्ट्रिंग "" भी रख सकते हैं।
+
     # 1. चैनल सदस्यता की जांच करें
     if not await is_user_subscribed(user_id, context.bot):
         if FORCE_SUBSCRIBE_CHANNEL_USERNAME:
@@ -72,6 +80,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 InlineKeyboardButton(get_text("force_subscribe_check_button", user_lang), callback_data="check_subscription")
             ]]
             reply_markup = InlineKeyboardMarkup(keyboard)
+            # यहाँ reply_text का उपयोग किया गया है
             await update.message.reply_text(text, reply_markup=reply_markup, disable_web_page_preview=True)
         else:
             await update.message.reply_text(get_text("force_subscribe_error_no_username", user_lang))
@@ -79,7 +88,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # 2. भाषा चयन की जांच करें (यदि उपयोगकर्ता ने पहले से कोई भाषा नहीं चुनी है)
     user_data = get_user_data(user_id)
-    if user_lang == DEFAULT_LANGUAGE and not user_data.get("language_set"): # एक ध्वज जोड़ें ताकि यह केवल एक बार दिखाई दे
+    if not user_data or not user_data.get("language_set"):
         text = get_text("choose_language", user_lang)
         keyboard = []
         for lang_code, lang_name in LANGUAGES.items():
@@ -94,14 +103,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # --- कॉलबैक हैंडलर: सदस्यता जांच के लिए ---
 async def check_subscription_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
+    await query.answer() # कॉलैक क्वेरी का जवाब दें
+
     user_id = str(query.from_user.id)
     user_lang = get_user_language(user_id)
 
     if await is_user_subscribed(user_id, context.bot):
-        # यदि सदस्यता की पुष्टि हो गई है, तो भाषा चयन पर आगे बढ़ें
         user_data = get_user_data(user_id)
-        if get_user_language(user_id) == DEFAULT_LANGUAGE and not user_data.get("language_set"):
+        if not user_data or not user_data.get("language_set"):
             text = get_text("choose_language", user_lang)
             keyboard = []
             for lang_code, lang_name in LANGUAGES.items():
@@ -122,28 +131,37 @@ async def check_subscription_callback(update: Update, context: ContextTypes.DEFA
 # --- कॉलबैक हैंडलर: भाषा बदलने के लिए ---
 async def change_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
+    await query.answer() # कॉलैक क्वेरी का जवाब दें
+
     user_id = str(query.from_user.id)
     
-    # यदि callback_data "set_lang_xx" है
     lang_code = query.data.replace("set_lang_", "")
     
     if lang_code in LANGUAGES:
-        set_user_language(user_id, lang_code)
-        # डेटाबेस में language_set फ्लैग को True पर सेट करें
-        update_user_data(user_id, {"language_set": True})
-        
-        user_lang = get_user_language(user_id) # नई भाषा में पाठ प्राप्त करें
-        await query.edit_message_text(get_text("language_set_success", user_lang).format(lang_name=LANGUAGES[lang_code]['name_in_english']))
-        await show_main_menu_from_query(query, context) # भाषा सेट करने के बाद मुख्य मेनू दिखाएं
+        try:
+            set_user_language(user_id, lang_code)
+            update_user_data(user_id, set_data={"language_set": True})
+            
+            user_lang = get_user_language(user_id) # नई भाषा में पाठ प्राप्त करें
+            await query.edit_message_text(get_text("language_set_success", user_lang).format(lang_name=LANGUAGES[lang_code]['name_in_english']))
+            await show_main_menu_from_query(query, context) # भाषा सेट करने के बाद मुख्य मेनू दिखाएं
+        except WriteError as e:
+            logger.error(f"MongoDB WriteError in change_language_callback for user {user_id}: {e}", exc_info=True)
+            user_lang = get_user_language(user_id)
+            await query.edit_message_text(get_text("error_language_change", user_lang))
+        except Exception as e:
+            logger.error(f"Unexpected error in change_language_callback for user {user_id}: {e}", exc_info=True)
+            user_lang = get_user_language(user_id)
+            await query.edit_message_text(get_text("error_general", user_lang))
     else:
-        await query.edit_message_text("Invalid language selection.")
+        user_lang = get_user_language(user_id)
+        await query.edit_message_text(get_text("invalid_language_selection", user_lang))
 
 # --- मुख्य मेनू दिखाने के लिए सहायक फ़ंक्शन (नया मैसेज) ---
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = str(update.effective_user.id)
     user_lang = get_user_language(user_id)
-    text = get_text("main_menu_message", user_lang) # एक नया टेक्स्ट 'main_menu_message' जोड़ें
+    text = get_text("main_menu_message", user_lang)
     keyboard = [[
         InlineKeyboardButton(get_text("start_button_earn", user_lang), callback_data="earn_points"),
         InlineKeyboardButton(get_text("start_button_refer", user_lang), callback_data="refer_friend"),
@@ -161,7 +179,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def show_main_menu_from_query(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = str(query.from_user.id)
     user_lang = get_user_language(user_id)
-    text = get_text("main_menu_message", user_lang) # एक नया टेक्स्ट 'main_menu_message' जोड़ें
+    text = get_text("main_menu_message", user_lang)
     keyboard = [[
         InlineKeyboardButton(get_text("start_button_earn", user_lang), callback_data="earn_points"),
         InlineKeyboardButton(get_text("start_button_refer", user_lang), callback_data="refer_friend"),
@@ -226,7 +244,8 @@ async def earn_points_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             text_message = get_text("earn_points_instructions", user_lang).format(shortlink_url=generated_shortlink)
             
             keyboard = [[
-                InlineKeyboardButton(get_text("button_check_completion", user_lang), callback_data=f"check_shortlink_{user_id}")
+                InlineKeyboardButton(get_text("button_visit_shortlink", user_lang), url=generated_shortlink), # यहाँ URL जोड़ा है
+                InlineKeyboardButton(get_text("button_check_completion_status", user_lang), callback_data=f"check_shortlink_{user_id}") # एक नया बटन जोड़ा है
             ]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -268,8 +287,14 @@ async def check_shortlink_completion_callback(update: Update, context: ContextTy
                 await query.edit_message_text(get_text("user_not_found", user_lang))
                 return
 
-            update_user_data(user_id, {"$inc": {"points": POINTS_PER_SHORTLINK}})
-            new_balance = current_user_data.get("points", 0) + POINTS_PER_SHORTLINK
+            if not isinstance(current_user_data.get("points"), (int, float)):
+                update_user_data(user_id, set_data={"points": 0})
+                logger.warning(f"User {user_id}'s points field was non-numeric/missing. Reset to 0 before increment.")
+
+            update_user_data(user_id, inc_data={"points": POINTS_PER_SHORTLINK})
+            
+            updated_user_data = get_user_data(user_id)
+            new_balance = updated_user_data.get("points", 0)
             
             await query.edit_message_text(get_text("shortlink_completed_success", user_lang).format(points=POINTS_PER_SHORTLINK, balance=new_balance))
             logger.info(f"User {user_id} completed shortlink and received {POINTS_PER_SHORTLINK} points.")
@@ -312,36 +337,26 @@ async def withdraw_points_callback(update: Update, context: ContextTypes.DEFAULT
 
 # --- Flask एप्लिकेशन सेटअप ---
 
-app = Flask(__name__) # Flask ऐप इंस्टेंस
+app = Flask(__name__)
 
-# Telegram हैंडलर जोड़ें (यह Application इंस्टेंस अब ग्लोबल है)
 application.add_handler(CommandHandler("start", start_command))
 application.add_handler(CommandHandler("help", help_command))
 
-# नए हैंडलर:
 application.add_handler(CallbackQueryHandler(check_subscription_callback, pattern="^check_subscription$"))
 application.add_handler(CallbackQueryHandler(change_language_callback, pattern="^set_lang_"))
 application.add_handler(CallbackQueryHandler(change_language_option_callback, pattern="^change_language_option$"))
 
-# शॉर्टलिंक हैंडलर
 application.add_handler(CallbackQueryHandler(earn_points_callback, pattern="^earn_points$"))
 application.add_handler(CallbackQueryHandler(check_shortlink_completion_callback, pattern="^check_shortlink_"))
 
-# अन्य सामान्य हैंडलर जोड़ें
 application.add_handler(CallbackQueryHandler(refer_friend_callback, pattern="^refer_friend$"))
 application.add_handler(CallbackQueryHandler(check_balance_callback, pattern="^check_balance$"))
 application.add_handler(CallbackQueryHandler(withdraw_points_callback, pattern="^withdraw_points$"))
 
-
-# Flask ऐप के शुरू होने पर Telegram Application को इनिशियलाइज़ और वेबहुक सेट करें।
-# यह Gunicorn द्वारा bot.py मॉड्यूल को लोड करते समय चलेगा।
 try:
-    # एक नया इवेंट लूप बनाएं और उसे सेट करें ताकि यह Gunicorn के लूप से टकराए नहीं
-    new_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(new_loop)
-
-    async def initial_telegram_setup():
-        full_webhook_url = f"{WEBHOOK_URL}/{BOT_TOKEN}"
+    async def initialize_and_set_webhook():
+        await application.initialize()
+        full_webhook_url = f"{WEBHOOK_URL}/webhook/{BOT_TOKEN}"
         try:
             current_webhook_info = await application.bot.get_webhook_info()
             if current_webhook_info.url != full_webhook_url:
@@ -351,38 +366,28 @@ try:
                 logger.info(f"Telegram webhook already set to: {full_webhook_url}")
         except Exception as e:
             logger.error(f"Failed to set Telegram webhook: {e}", exc_info=True)
-            # यदि वेबहुक सेट नहीं होता है तो भी आगे बढ़ें, लेकिन यह समस्या का संकेत है
-
-        await application.initialize()
-        await application.start() # यह internal PTB logic शुरू करता है
+        
+        await application.start()
         logger.info("Telegram Application initialized and started (webhook mode).")
 
-    # प्रारंभिक सेटअप को नए इवेंट लूप में चलाएं
-    new_loop.run_until_complete(initial_telegram_setup())
-    new_loop.close() # अस्थायी लूप को बंद करें
+    asyncio.run(initialize_and_set_webhook())
 
 except Exception as e:
     logger.critical(f"FATAL ERROR during initial Telegram Application setup: {e}", exc_info=True)
-    # यदि आवश्यक सेटअप विफल रहता है तो प्रक्रिया को रोकना महत्वपूर्ण है
     raise e
 
-# Telegram अपडेट्स को हैंडल करने के लिए Flask वेबहुक एंडपॉइंट
 @app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
 async def telegram_webhook():
     """Handle incoming Telegram updates via webhook."""
     try:
         update_json = request.get_json(force=True)
         update = Update.de_json(update_json, application.bot)
-        # Telegram अपडेट को process_update के माध्यम से भेजें
-        await application.process_update(update)
+        asyncio.create_task(application.process_update(update))
         return "ok"
     except Exception as e:
         logger.error(f"Error processing Telegram update: {e}", exc_info=True)
         return "error", 500
 
-# यदि आप इसे सीधे चला रहे हैं (केवल विकास/परीक्षण के लिए, उत्पादन के लिए नहीं)
-# Koyeb जैसे प्रोडक्शन में Gunicorn 'app' ऑब्जेक्ट को सीधे उठाएगा
 if __name__ == "__main__":
     logger.info("Running Flask app in development mode.")
-    # Flask ऐप को run करें। Gunicorn इस 'app' ऑब्जेक्ट को उठाएगा।
     app.run(host="0.0.0.0", port=8000, debug=True)
