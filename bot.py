@@ -367,7 +367,7 @@ except Exception as e:
     raise e
 
 # Telegram अपडेट्स को हैंडल करने के लिए Flask वेबहुक एंडपॉइंट
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+@app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
 async def telegram_webhook():
     """Handle incoming Telegram updates via webhook."""
     try:
