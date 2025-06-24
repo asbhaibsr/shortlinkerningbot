@@ -8,7 +8,7 @@ from telegram.ext import (
 from datetime import datetime
 from bson.objectid import ObjectId
 import json
-import asyncio
+import asyncio # यह पहले से ही होगा, बस पुष्टि कर रहा हूं
 import os
 from pymongo.errors import WriteError
 
@@ -341,13 +341,13 @@ application.add_handler(CallbackQueryHandler(withdraw_points_callback, pattern="
 
 
 # बॉट को पोलिंग मोड में चलाएं
-def main() -> None:
+async def main() -> None: # main() को async फ़ंक्शन बनाएं
     logger.info("Starting bot in polling mode...")
     # Polling शुरू करने से पहले किसी भी मौजूदा वेबहुक को हटा दें
     try:
-        current_webhook_info = asyncio.run(application.bot.get_webhook_info())
+        current_webhook_info = await application.bot.get_webhook_info() # await का उपयोग करें
         if current_webhook_info.url:
-            asyncio.run(application.bot.delete_webhook())
+            await application.bot.delete_webhook() # await का उपयोग करें
             logger.info("Existing webhook deleted.")
     except Exception as e:
         logger.warning(f"Could not delete webhook (might not exist): {e}")
@@ -359,4 +359,5 @@ def main() -> None:
     # poll_interval: यह run_polling() के अंदर पोलिंग के बीच विलंब है
 
 if __name__ == "__main__":
-    main()
+    # main() फ़ंक्शन अब एक async फ़ंक्शन है, इसलिए इसे चलाने के लिए asyncio.run() का उपयोग करें
+    asyncio.run(main())
