@@ -1,7 +1,6 @@
 import os
 import logging
 from datetime import datetime, timedelta
-from flask import Flask
 from pymongo import MongoClient
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -10,18 +9,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
-import requests # requests लाइब्रेरी को इम्पोर्ट किया गया है
-
-# Initialize Flask app
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "EarnBot is running!"
-
-def run_flask():
-    port = int(os.environ.get('FLASK_PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+import requests
 
 # Enable logging
 logging.basicConfig(
@@ -47,7 +35,6 @@ REFERRAL_BONUS = 0.50
 LINK_COOLDOWN = 5  # minutes
 
 # Shortlink API configuration
-# आपकी SmallShorts.com API token सीधे कोड में डाली गई है
 API_TOKEN = '4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0'
 SHORTS_API_BASE_URL = "https://dashboard.smallshorts.com/api"
 
@@ -87,7 +74,7 @@ def generate_short_link(long_url):
             'url': long_url
         }
         response = requests.get(SHORTS_API_BASE_URL, params=params)
-        response.raise_for_status() # HTTP errors के लिए
+        response.raise_for_status()
         result = response.json()
 
         if result.get('status') == 'error':
@@ -105,29 +92,56 @@ def generate_short_link(long_url):
         logger.error(f"Error parsing SmallShorts API response (not JSON): {e}")
         return None
 
-
 # Bot handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = get_user(user_id)
-    
-    if context.args and context.args[0].startswith('ref_'):
-        referrer_id = int(context.args[0].split('_')[1])
-        referrer = get_user(referrer_id)
-        if referrer and referrer['user_id'] != user_id:
-            update_user(referrer_id, {
-                "referrals": referrer['referrals'] + 1,
-                "referral_earnings": referrer['referral_earnings'] + REFERRAL_BONUS,
-                "balance": referrer['balance'] + REFERRAL_BONUS,
-                "total_earned": referrer['total_earned'] + REFERRAL_BONUS
-            })
-    
+    bot_username = (await context.bot.get_me()).username # Get bot's username
+
+    if context.args:
+        arg = context.args[0]
+        if arg.startswith('ref_'):
+            referrer_id = int(arg.split('_')[1])
+            referrer = get_user(referrer_id)
+            if referrer and referrer['user_id'] != user_id:
+                update_user(referrer_id, {
+                    "referrals": referrer['referrals'] + 1,
+                    "referral_earnings": referrer['referral_earnings'] + REFERRAL_BONUS,
+                    "balance": referrer['balance'] + REFERRAL_BONUS,
+                    "total_earned": referrer['total_earned'] + REFERRAL_BONUS
+                })
+                await update.message.reply_text(
+                    f"🎉 You were referred by {referrer['user_id']}! Welcome to Earn Bot!"
+                )
+        elif arg.startswith('solve_'):
+            solved_user_id = int(arg.split('_')[1])
+            # Ensure the user completing the link is the one who generated it
+            if solved_user_id == user_id:
+                # Check if the user is not on cooldown (to prevent immediate re-earning without a new link)
+                if user['last_click'] and (datetime.utcnow() - user['last_click']) < timedelta(minutes=LINK_COOLDOWN):
+                    await update.message.reply_text(
+                        "⏳ You've recently completed a link. Please generate a new one to earn again."
+                    )
+                else:
+                    new_balance = user['balance'] + EARN_PER_LINK
+                    update_user(user_id, {
+                        "balance": new_balance,
+                        "total_earned": user['total_earned'] + EARN_PER_LINK,
+                        "last_click": datetime.utcnow() # Update last_click when earning
+                    })
+                    await update.message.reply_text(
+                        f"✅ Link solved successfully!\n"
+                        f"💰 You earned ₹{EARN_PER_LINK:.2f}. Your new balance: ₹{new_balance:.2f}"
+                    )
+            else:
+                await update.message.reply_text("This link was not generated for you.")
+
     keyboard = [
         [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')],
         [InlineKeyboardButton("📊 My Wallet", callback_data='wallet')],
         [InlineKeyboardButton("👥 Refer Friends", callback_data='referral')]
     ]
-    
+
     await update.message.reply_text(
         "🎉 Welcome to Earn Bot!\n"
         "Solve links and earn ₹0.15 per link!\n"
@@ -138,21 +152,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     user_id = query.from_user.id
     user = get_user(user_id)
-    
+    bot_username = (await context.bot.get_me()).username # Get bot's username
+
     if query.data == 'generate_link':
         # Check if user is on cooldown
         if user['last_click'] and (datetime.utcnow() - user['last_click']) < timedelta(minutes=LINK_COOLDOWN):
             remaining = (user['last_click'] + timedelta(minutes=LINK_COOLDOWN)) - datetime.utcnow()
-            await query.edit_message_text(f"⏳ Please wait {int(remaining.seconds/60)} minutes before generating another link.")
+            remaining_minutes = int(remaining.seconds / 60)
+            await query.edit_message_text(f"⏳ Please wait {remaining_minutes} minutes before generating another link.")
             return
-        
-        # Original destination link (जिसे आप छोटा करना चाहते हैं)
-        # आपको इस लिंक को अपनी वास्तविक earning website के लिंक से बदलना होगा
-        destination_link = f"https://yourrealearningwebsite.com/task/{user_id}" 
-        
+
+        # Original destination link (this is where SmallShorts will redirect AFTER completion)
+        # This link will bring the user BACK to your bot with a 'solve_{user_id}' parameter.
+        destination_link = f"https://t.me/{bot_username}?start=solve_{user_id}"
+
         # Shortlink generate करें
         short_link = generate_short_link(destination_link)
 
@@ -162,22 +178,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Generate a new link and update user balance
-        new_balance = user['balance'] + EARN_PER_LINK
-        update_user(user_id, {
-            "balance": new_balance,
-            "total_earned": user['total_earned'] + EARN_PER_LINK,
-            "last_click": datetime.utcnow()
-        })
-        
+        # Inform user about the link and how to earn
         await query.edit_message_text(
             f"🔗 Here's your link to solve:\n\n"
-            f"{short_link}\n\n" # <-- यहां शॉर्टलिंक दिखाएंगे
-            f"💰 You earned ₹{EARN_PER_LINK}. New balance: ₹{new_balance:.2f}\n"
-            f"⏳ Next link available in {LINK_COOLDOWN} minutes.",
+            f"{short_link}\n\n"
+            f"Click the link, complete the steps, and you'll be redirected back to me. Once you're back, your balance will be updated!"
+            f"⏳ Next link available in {LINK_COOLDOWN} minutes after successful completion.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
         )
-    
+
     elif query.data == 'wallet':
         await query.edit_message_text(
             f"💰 Your Wallet\n\n"
@@ -191,18 +200,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]
             ])
         )
-    
+
     elif query.data == 'referral':
         await query.edit_message_text(
             f"👥 Referral Program\n\n"
             f"🔗 Your referral link:\n"
-            f"https://t.me/{(await context.bot.get_me()).username}?start={user['referral_code']}\n\n"
+            f"https://t.me/{bot_username}?start={user['referral_code']}\n\n"
             f"💰 Earn ₹{REFERRAL_BONUS} for each friend who joins using your link!\n"
             f"👥 Total referrals: {user['referrals']}\n"
             f"💸 Earned from referrals: ₹{user['referral_earnings']:.2f}",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
         )
-    
+
     elif query.data == 'back_to_main':
         keyboard = [
             [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')],
@@ -215,6 +224,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Minimum withdrawal: ₹70",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
+    elif query.data == 'withdraw':
+        await query.edit_message_text(
+            "⚠️ Withdrawal is not yet implemented. Please check back later!",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+        )
+
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Exception while handling update:", exc_info=context.error)
@@ -230,12 +246,12 @@ def run_bot():
         # Add handlers
         application.add_handler(CommandHandler('start', start))
         application.add_handler(CallbackQueryHandler(button_handler))
-        
+
         application.add_error_handler(error_handler)
 
         PORT = int(os.environ.get('PORT', 8443))
         HEROKU_APP_NAME = os.environ.get('HEROKU_APP_NAME')
-        
+
         if HEROKU_APP_NAME:
             application.run_webhook(
                 listen="0.0.0.0",
@@ -245,17 +261,11 @@ def run_bot():
             )
         else:
             application.run_polling()
-            
+
     except Exception as e:
         logger.error(f"Failed to start bot: {e}")
         raise
 
 if __name__ == '__main__':
-    # Start Flask in a separate thread
-    from threading import Thread
-    flask_thread = Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    
-    # Start the Telegram bot
     run_bot()
+
