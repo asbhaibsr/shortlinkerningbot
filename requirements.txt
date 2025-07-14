@@ -1,3 +1,2 @@
-python-telegram-bot
-pymongo
-requests
+python-telegram-bot==13.7
+pymongo==4.2.0
