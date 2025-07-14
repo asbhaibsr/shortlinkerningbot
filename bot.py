@@ -1,358 +1,296 @@
-import random
-import requests
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, ReplyKeyboardRemove
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-)
-from datetime import datetime
-from bson.objectid import ObjectId
-import json
-import asyncio
 import os
-from pymongo.errors import WriteError
-
-# आपकी कस्टम इम्पोर्ट्स (सुनिश्चित करें कि config.py में सभी आवश्यक वेरिएबल्स हैं)
-from config import (
-    BOT_TOKEN, ADMIN_WITHDRAWAL_CHANNEL_ID, SHORTLINK_API_URL, SHORTLINK_API_KEY,
-    POINTS_PER_SHORTLINK, REFERRAL_POINTS_PER_REFERRAL, POINTS_PER_CHANNEL_JOIN,
-    MIN_WITHDRAWAL_POINTS, UPI_QR_BANK_POINTS_TO_RUPEES_RATE, REDEEM_CODE_POINTS_TO_RUPEES_RATE,
-    FORCE_SUBSCRIBE_CHANNEL_ID, FORCE_SUBSCRIBE_CHANNEL_USERNAME, JOIN_TO_EARN_CHANNELS,
-)
-from languages import LANGUAGES, DEFAULT_LANGUAGE, get_text
-from database_utils import (
-    init_db, get_user_data, update_user_data, record_withdrawal_request,
-    set_user_language, withdrawal_requests_collection, users_collection, # users_collection यहां से इम्पोर्ट किया जा रहा है
-    get_user_language, update_withdrawal_request_status
+import logging
+from datetime import datetime, timedelta
+from pymongo import MongoClient
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Updater,
+    CommandHandler,
+    CallbackQueryHandler,
+    ConversationHandler,
+    MessageHandler,
+    Filters,
+    CallbackContext,
 )
 
-# Logging कॉन्फ़िगरेशन
+# Enable logging
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# डेटाबेस कनेक्शन को इनिशियलाइज़ करें
+# MongoDB setup
+MONGO_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017')
+client = MongoClient(MONGO_URI)
+db = client.get_database('earnbot')
+users = db.users
+
+# Bot states
+WAITING_FOR_UPI = 1
+
+# Bot configuration
+MIN_WITHDRAWAL = 70
+EARN_PER_LINK = 0.15
+REFERRAL_BONUS = 0.50
+LINK_COOLDOWN = 5  # minutes
+
+# Initialize database indexes
+def init_db():
+    users.create_index("user_id", unique=True)
+    users.create_index("referral_code", unique=True, sparse=True)
+
 init_db()
 
-# Telegram.ext.Application इंस्टेंस को ग्लोबल बनाएं
-application = Application.builder().token(BOT_TOKEN).build()
+# Helper functions
+def get_user(user_id):
+    user = users.find_one({"user_id": user_id})
+    if not user:
+        user = {
+            "user_id": user_id,
+            "balance": 0.0,
+            "referral_code": f"ref_{user_id}",
+            "referrals": 0,
+            "referral_earnings": 0.0,
+            "total_earned": 0.0,
+            "withdrawn": 0.0,
+            "last_click": None,
+            "created_at": datetime.utcnow(),
+        }
+        users.insert_one(user)
+    return user
 
-# --- सहायक कार्य: चैनल सदस्यता की जांच करें ---
-async def is_user_subscribed(user_id: str, bot) -> bool:
-    if not FORCE_SUBSCRIBE_CHANNEL_ID:
-        return True # यदि कोई अनिवार्य चैनल नहीं है, तो हमेशा True लौटाएं
+def update_user(user_id, update_data):
+    users.update_one({"user_id": user_id}, {"$set": update_data})
 
-    try:
-        member = await bot.get_chat_member(FORCE_SUBSCRIBE_CHANNEL_ID, user_id)
-        # सदस्य या व्यवस्थापक होने पर True लौटाएं
-        return member.status in ["member", "administrator", "creator"]
-    except Exception as e:
-        logger.error(f"Error checking channel subscription for user {user_id}: {e}", exc_info=True)
-        return False # त्रुटि होने पर False लौटाएं
-
-# --- कमांड हैंडलर: /start कमांड ---
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = str(update.effective_user.id)
-    user_name = update.effective_user.first_name
-    user_lang = get_user_language(user_id) # उपयोगकर्ता की मौजूदा भाषा प्राप्त करें
-
-    # ReplyKeyboardRemove भेजें ताकि कोई भी पुराना ReplyKeyboard हटा दिया जाए।
-    await update.message.reply_text(get_text("welcome_message_initial", user_lang), reply_markup=ReplyKeyboardRemove())
-
-    # 2. भाषा चयन की जांच करें (यदि उपयोगकर्ता ने पहले से कोई भाषा नहीं चुनी है)
-    # पहले उपयोगकर्ता डेटा प्राप्त करें
-    user_data = get_user_data(user_id) # यह कॉल सुनिश्चित करेगा कि उपयोगकर्ता मौजूद है और उसमें `language_set` फ़ील्ड है
+# Bot handlers
+def start(update: Update, context: CallbackContext) -> None:
+    user_id = update.effective_user.id
+    user = get_user(user_id)
     
-    if not user_data.get("language_set"): # सीधे .get() का उपयोग करें
-        text = get_text("choose_language", user_lang)
-        keyboard = []
-        for lang_code, lang_name in LANGUAGES.items():
-            keyboard.append([InlineKeyboardButton(lang_name.get("name_in_english"), callback_data=f"set_lang_{lang_code}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(text, reply_markup=reply_markup)
-        return # यहां रुकें, आगे न बढ़ें
+    # Check if this is a referral
+    if context.args and context.args[0].startswith('ref_'):
+        referrer_id = int(context.args[0].split('_')[1])
+        referrer = get_user(referrer_id)
+        if referrer and referrer['user_id'] != user_id:
+            update_user(referrer_id, {
+                "referrals": referrer['referrals'] + 1,
+                "referral_earnings": referrer['referral_earnings'] + REFERRAL_BONUS,
+                "balance": referrer['balance'] + REFERRAL_BONUS,
+                "total_earned": referrer['total_earned'] + REFERRAL_BONUS
+            })
+    
+    keyboard = [
+        [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')],
+        [InlineKeyboardButton("📊 My Wallet", callback_data='wallet')],
+        [InlineKeyboardButton("👥 Refer Friends", callback_data='referral')]
+    ]
+    
+    update.message.reply_text(
+        "🎉 Welcome to Earn Bot!\n"
+        "Solve links and earn ₹0.15 per link!\n"
+        "Minimum withdrawal: ₹70",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-    # 1. चैनल सदस्यता की जांच करें (भाषा चुनने के बाद करें)
-    if not await is_user_subscribed(user_id, context.bot):
-        if FORCE_SUBSCRIBE_CHANNEL_USERNAME:
-            channel_link = f"https://t.me/{FORCE_SUBSCRIBE_CHANNEL_USERNAME}"
-            text = get_text("force_subscribe_message", user_lang).format(channel_link=channel_link)
-            keyboard = [[
-                InlineKeyboardButton(get_text("force_subscribe_button", user_lang), url=channel_link),
-                InlineKeyboardButton(get_text("force_subscribe_check_button", user_lang), callback_data="check_subscription")
-            ]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(text, reply_markup=reply_markup, disable_web_page_preview=True)
-        else:
-            await update.message.reply_text(get_text("force_subscribe_error_no_username", user_lang))
-        return # यहां रुकें, आगे न बढ़ें
-
-
-    # यदि चैनल में शामिल हो गए हैं और भाषा चुन ली गई है, तो मुख्य मेनू दिखाएं
-    await show_main_menu(update, context)
-
-# --- कॉलबैक हैंडलर: सदस्यता जांच के लिए ---
-async def check_subscription_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def generate_link(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    await query.answer() # कॉलैक क्वेरी का जवाब दें
+    query.answer()
+    
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    
+    # Check cooldown
+    if user['last_click'] and (datetime.utcnow() - user['last_click']) < timedelta(minutes=LINK_COOLDOWN):
+        remaining = (user['last_click'] + timedelta(minutes=LINK_COOLDOWN) - datetime.utcnow()).seconds // 60
+        query.edit_message_text(
+            f"⏳ Please wait {remaining} minutes before generating another link!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 My Wallet", callback_data='wallet')]
+            ])
+        )
+        return
+    
+    # In a real bot, you would call the shortlink API here
+    # For demo, we'll just show a mock link
+    shortlink = "https://smallshorts.example.com/abcd123"
+    
+    query.edit_message_text(
+        f"🔗 Solve this link to earn ₹{EARN_PER_LINK}:\n{shortlink}\n\n"
+        "After solving, return here and click 'I completed'",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ I Completed", callback_data=f'verify_{user_id}')]
+        ])
+    )
 
-    user_id = str(query.from_user.id)
-    user_lang = get_user_language(user_id)
-
-    if await is_user_subscribed(user_id, context.bot):
-        user_data = get_user_data(user_id) # उपयोगकर्ता डेटा फिर से प्राप्त करें
-        if not user_data.get("language_set"): # सीधे .get() का उपयोग करें
-            text = get_text("choose_language", user_lang)
-            keyboard = []
-            for lang_code, lang_name in LANGUAGES.items():
-                keyboard.append([InlineKeyboardButton(lang_name.get("name_in_english"), callback_data=f"set_lang_{lang_code}")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(text, reply_markup=reply_markup)
-        else:
-            await show_main_menu_from_query(query, context) # मुख्य मेनू दिखाएं
-    else:
-        text = get_text("force_subscribe_not_joined", user_lang)
-        keyboard = [[
-            InlineKeyboardButton(get_text("force_subscribe_button", user_lang), url=f"https://t.me/{FORCE_SUBSCRIBE_CHANNEL_USERNAME}"),
-            InlineKeyboardButton(get_text("force_subscribe_check_button", user_lang), callback_data="check_subscription")
-        ]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, disable_web_page_preview=True)
-
-# --- कॉलबैक हैंडलर: भाषा बदलने के लिए ---
-async def change_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def verify_completion(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    await query.answer() # कॉलैक क्वेरी का जवाब दें
-
-    user_id = str(query.from_user.id)
+    query.answer()
     
-    lang_code = query.data.replace("set_lang_", "")
+    user_id = update.effective_user.id
+    user = get_user(user_id)
     
-    if lang_code in LANGUAGES:
-        try:
-            set_user_language(user_id, lang_code)
-            # यहाँ अपडेट करें `set_fields` का उपयोग करके
-            update_user_data(user_id, set_fields={"language_set": True}) 
-            
-            user_lang = get_user_language(user_id) # नई भाषा में पाठ प्राप्त करें
-            await query.edit_message_text(get_text("language_set_success", user_lang).format(lang_name=LANGUAGES[lang_code]['name_in_english']))
-            await show_main_menu_from_query(query, context) # भाषा सेट करने के बाद मुख्य मेनू दिखाएं
-        except WriteError as e:
-            logger.error(f"MongoDB WriteError in change_language_callback for user {user_id}: {e}", exc_info=True)
-            user_lang = get_user_language(user_id)
-            await query.edit_message_text(get_text("error_language_change", user_lang))
-        except Exception as e:
-            logger.error(f"Unexpected error in change_language_callback for user {user_id}: {e}", exc_info=True)
-            user_lang = get_user_language(user_id)
-            await query.edit_message_text(get_text("error_general", user_lang))
-    else:
-        user_lang = get_user_language(user_id)
-        await query.edit_message_text(get_text("invalid_language_selection", user_lang))
+    # In a real bot, you would verify with the shortlink service API
+    # For demo, we'll assume the user completed it
+    
+    new_balance = user['balance'] + EARN_PER_LINK
+    update_user(user_id, {
+        "balance": new_balance,
+        "total_earned": user['total_earned'] + EARN_PER_LINK,
+        "last_click": datetime.utcnow()
+    })
+    
+    query.edit_message_text(
+        f"✅ ₹{EARN_PER_LINK} Credited! New balance: ₹{new_balance:.2f}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Next Link", callback_data='generate_link')],
+            [InlineKeyboardButton("💳 My Wallet", callback_data='wallet')]
+        ])
+    )
 
-# --- मुख्य मेनू दिखाने के लिए सहायक फ़ंक्शन (नया मैसेज) ---
-async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = str(update.effective_user.id)
-    user_lang = get_user_language(user_id)
-    text = get_text("main_menu_message", user_lang)
-    keyboard = [[
-        InlineKeyboardButton(get_text("start_button_earn", user_lang), callback_data="earn_points"),
-        InlineKeyboardButton(get_text("start_button_refer", user_lang), callback_data="refer_friend"),
-    ], [
-        InlineKeyboardButton(get_text("start_button_balance", user_lang), callback_data="check_balance"),
-        InlineKeyboardButton(get_text("start_button_withdraw", user_lang), callback_data="withdraw_points"),
-    ], [
-        InlineKeyboardButton(get_text("start_button_language", user_lang), callback_data="change_language_option"),
-        InlineKeyboardButton(get_text("start_button_help", user_lang), callback_data="help_info"),
-    ]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(text, reply_markup=reply_markup)
-
-# कॉलबैक क्वेरी से मुख्य मेनू दिखाने के लिए (मौजूदा मैसेज को एडिट)
-async def show_main_menu_from_query(query, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = str(query.from_user.id)
-    user_lang = get_user_language(user_id)
-    text = get_text("main_menu_message", user_lang)
-    keyboard = [[
-        InlineKeyboardButton(get_text("start_button_earn", user_lang), callback_data="earn_points"),
-        InlineKeyboardButton(get_text("start_button_refer", user_lang), callback_data="refer_friend"),
-    ], [
-        InlineKeyboardButton(get_text("start_button_balance", user_lang), callback_data="check_balance"),
-        InlineKeyboardButton(get_text("start_button_withdraw", user_lang), callback_data="withdraw_points"),
-    ], [
-        InlineKeyboardButton(get_text("start_button_language", user_lang), callback_data="change_language_option"),
-        InlineKeyboardButton(get_text("start_button_help", user_lang), callback_data="help_info"),
-    ]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text, reply_markup=reply_markup)
-
-
-# --- कॉलबैक हैंडलर: भाषा बदलने के लिए बटन पर क्लिक करने पर ---
-async def change_language_option_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def show_wallet(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    await query.answer()
-    user_id = str(query.from_user.id)
-    user_lang = get_user_language(user_id)
+    query.answer()
     
-    text = get_text("choose_language", user_lang)
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    
     keyboard = []
-    for lang_code, lang_name in LANGUAGES.items():
-        keyboard.append([InlineKeyboardButton(lang_name.get("name_in_english"), callback_data=f"set_lang_{lang_code}")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text, reply_markup=reply_markup)
+    if user['balance'] >= MIN_WITHDRAWAL:
+        keyboard.append([InlineKeyboardButton("💰 Withdraw", callback_data='withdraw')])
+    
+    query.edit_message_text(
+        f"💼 Your Wallet\n\n"
+        f"Balance: ₹{user['balance']:.2f}\n"
+        f"Total Earned: ₹{user['total_earned']:.2f}\n"
+        f"Withdrawn: ₹{user['withdrawn']:.2f}\n"
+        f"Referrals: {user['referrals']} (₹{user['referral_earnings']:.2f})\n\n"
+        f"Minimum withdrawal: ₹{MIN_WITHDRAWAL}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-# --- कमांड हैंडलर: /help कमांड ---
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = str(update.effective_user.id)
-    user_lang = get_user_language(user_id)
-    text = get_text("help_message", user_lang)
-    await update.message.reply_text(text)
-
-
-# --- कॉलबैक हैंडलर: अर्निंग पॉइंट्स के लिए ---
-async def earn_points_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def withdraw(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
-    await query.answer()
-    user_id = str(query.from_user.id)
-    user_lang = get_user_language(user_id)
+    query.answer()
+    
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    
+    if user['balance'] < MIN_WITHDRAWAL:
+        query.edit_message_text(
+            f"❌ You need at least ₹{MIN_WITHDRAWAL} to withdraw. Current balance: ₹{user['balance']:.2f}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')]
+            ])
+        )
+        return ConversationHandler.END
+    
+    query.edit_message_text(
+        "📤 Please send your UPI ID for withdrawal (e.g., 1234567890@ybl):\n\n"
+        "Type /cancel to cancel withdrawal"
+    )
+    return WAITING_FOR_UPI
 
-    # Shortlink API से URL जनरेट करें
-    try:
-        target_url = "https://example.com/thank-you-for-visiting-our-site" 
-        
-        shortlink_api_params = {
-            "api": SHORTLINK_API_KEY,
-            "url": target_url,
-            "data": user_id 
-        }
-        
-        response = requests.get(SHORTLINK_API_URL, params=shortlink_api_params)
-        response.raise_for_status() 
+def process_upi(update: Update, context: CallbackContext) -> int:
+    user_id = update.effective_user.id
+    upi_id = update.message.text
+    user = get_user(user_id)
+    
+    # Simple UPI ID validation
+    if '@' not in upi_id or len(upi_id) < 5:
+        update.message.reply_text("❌ Invalid UPI ID. Please send a valid UPI ID (e.g., 1234567890@ybl)")
+        return WAITING_FOR_UPI
+    
+    # Process withdrawal
+    amount = user['balance']
+    update_user(user_id, {
+        "balance": 0.0,
+        "withdrawn": user['withdrawn'] + amount
+    })
+    
+    # In a real bot, you would process the payment here
+    update.message.reply_text(
+        f"✅ Withdrawal request for ₹{amount:.2f} to {upi_id} submitted!\n"
+        "Processing may take 24-48 hours.\n\n"
+        "Use /start to return to main menu"
+    )
+    
+    return ConversationHandler.END
 
-        shortlink_data = response.json()
-        
-        if shortlink_data and shortlink_data.get("status") == "success" and shortlink_data.get("shortenedUrl"):
-            generated_shortlink = shortlink_data["shortenedUrl"]
-            
-            text_message = get_text("earn_points_instructions", user_lang).format(shortlink_url=generated_shortlink)
-            
-            keyboard = [[
-                InlineKeyboardButton(get_text("button_visit_shortlink", user_lang), url=generated_shortlink),
-                InlineKeyboardButton(get_text("button_check_completion_status", user_lang), callback_data=f"check_shortlink_{user_id}")
-            ]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await query.edit_message_text(text_message, reply_markup=reply_markup, disable_web_page_preview=True)
+def cancel_withdrawal(update: Update, context: CallbackContext) -> int:
+    update.message.reply_text("❌ Withdrawal cancelled.")
+    return ConversationHandler.END
 
-        else:
-            await query.edit_message_text(get_text("error_generating_shortlink", user_lang), parse_mode='HTML')
-            logger.error(f"Failed to generate shortlink for user {user_id}: {shortlink_data}")
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling shortlink API for user {user_id}: {e}", exc_info=True)
-        await query.edit_message_text(get_text("error_api_call", user_lang), parse_mode='HTML')
-    except Exception as e:
-        logger.error(f"Unexpected error in earn_points_callback for user {user_id}: {e}", exc_info=True)
-        await query.edit_message_text(get_text("error_general", user_lang), parse_mode='HTML')
-
-
-# --- कॉलबैक हैंडलर: शॉर्टलिंक पूरा होने की जांच करें ---
-async def check_shortlink_completion_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def show_referral(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    await query.answer()
-    user_id = str(query.from_user.id)
-    user_lang = get_user_language(user_id)
+    query.answer()
+    
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    
+    ref_link = f"https://t.me/{context.bot.username}?start={user['referral_code']}"
+    
+    query.edit_message_text(
+        f"👥 Referral Program\n\n"
+        f"Invite friends and earn ₹{REFERRAL_BONUS} per referral!\n\n"
+        f"Your referral link:\n{ref_link}\n\n"
+        "When someone joins using your link and earns ₹5, you get ₹0.50 bonus!"
+    )
 
-    try:
-        check_api_params = {
-            "api": SHORTLINK_API_KEY,
-            "sub_id": user_id, 
-        }
-        
-        response = requests.get(f"{SHORTLINK_API_URL}/status", params=check_api_params) 
-        response.raise_for_status()
+def error_handler(update: Update, context: CallbackContext) -> None:
+    logger.error(msg="Exception while handling an update:", exc_info=context.error)
+    
+    if update.callback_query:
+        update.callback_query.message.reply_text('⚠️ An error occurred. Please try again.')
+    else:
+        update.message.reply_text('⚠️ An error occurred. Please try again.')
 
-        status_data = response.json()
-        
-        if status_data and status_data.get("status") == "completed" and status_data.get("sub_id") == user_id:
-            current_user_data = get_user_data(user_id)
-            if not current_user_data:
-                await query.edit_message_text(get_text("user_not_found", user_lang))
-                return
-
-            # Note: Changed 'points' to 'balance' as per your database_utils.py structure
-            if not isinstance(current_user_data.get("balance"), (int, float)):
-                update_user_data(user_id, set_fields={"balance": 0.0}) # Use set_fields
-                logger.warning(f"User {user_id}'s balance field was non-numeric/missing. Reset to 0 before increment.")
-
-            update_user_data(user_id, balance_change=POINTS_PER_SHORTLINK, shortlinks_solved_change=1) # balance_change and shortlinks_solved_change are now correct
-            
-            updated_user_data = get_user_data(user_id)
-            new_balance = updated_user_data.get("balance", 0) # Use 'balance'
-            
-            await query.edit_message_text(get_text("shortlink_completed_success", user_lang).format(points=POINTS_PER_SHORTLINK, balance=new_balance))
-            logger.info(f"User {user_id} completed shortlink and received {POINTS_PER_SHORTLINK} points.")
-        else:
-            await query.edit_message_text(get_text("shortlink_not_completed", user_lang))
-            logger.info(f"User {user_id} shortlink not yet completed or status not confirmed.")
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error checking shortlink API status for user {user_id}: {e}", exc_info=True)
-        await query.edit_message_text(get_text("error_api_check", user_lang), parse_mode='HTML')
-    except Exception as e:
-        logger.error(f"Unexpected error in check_shortlink_completion_callback for user {user_id}: {e}", exc_info=True)
-        await query.edit_message_text(get_text("error_general", user_lang), parse_mode='HTML')
-
-
-async def refer_friend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    user_id = str(query.from_user.id)
-    user_lang = get_user_language(user_id)
-    referral_link = f"https://t.me/{context.bot.username}?start=refer_{user_id}"
-    await query.edit_message_text(get_text("refer_message", user_lang).format(referral_link=referral_link))
-
-async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    user_id = str(query.from_user.id)
-    user_lang = get_user_language(user_id)
-    user_data = get_user_data(user_id)
-    points = user_data.get("balance", 0) # Use 'balance'
-    await query.edit_message_text(get_text("balance_message", user_lang).format(points=points))
-
-async def withdraw_points_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    user_id = str(query.from_user.id)
-    user_lang = get_user_language(user_id)
-    await query.edit_message_text(get_text("withdraw_message", user_lang))
-
-
-# Telegram हैंडलर जोड़ें
-application.add_handler(CommandHandler("start", start_command))
-application.add_handler(CommandHandler("help", help_command))
-
-application.add_handler(CallbackQueryHandler(check_subscription_callback, pattern="^check_subscription$"))
-application.add_handler(CallbackQueryHandler(change_language_callback, pattern="^set_lang_"))
-application.add_handler(CallbackQueryHandler(change_language_option_callback, pattern="^change_language_option$"))
-
-application.add_handler(CallbackQueryHandler(earn_points_callback, pattern="^earn_points$"))
-application.add_handler(CallbackQueryHandler(check_shortlink_completion_callback, pattern="^check_shortlink_"))
-
-application.add_handler(CallbackQueryHandler(refer_friend_callback, pattern="^refer_friend$"))
-application.add_handler(CallbackQueryHandler(check_balance_callback, pattern="^check_balance$"))
-application.add_handler(CallbackQueryHandler(withdraw_points_callback, pattern="^withdraw_points$"))
-
-
-# बॉट को पोलिंग मोड में चलाएं
 def main() -> None:
-    logger.info("Starting bot in polling mode...")
+    # Create the Updater and pass it your bot's token.
+    TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    if not TOKEN:
+        raise ValueError("No TELEGRAM_BOT_TOKEN environment variable set")
     
-    # Existing webhook cleanup code removed / commented out for polling mode.
-    # No changes here from the last working version for this section.
-    
-    application.run_polling(poll_interval=0.5, timeout=30, drop_pending_updates=True) 
+    updater = Updater(TOKEN)
+    dispatcher = updater.dispatcher
 
-if __name__ == "__main__":
+    # Add conversation handler for withdrawals
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(withdraw, pattern='^withdraw$')],
+        states={
+            WAITING_FOR_UPI: [
+                MessageHandler(Filters.text & ~Filters.command, process_upi),
+                CommandHandler('cancel', cancel_withdrawal)
+            ],
+        },
+        fallbacks=[CommandHandler('cancel', cancel_withdrawal)],
+    )
+
+    # Register handlers
+    dispatcher.add_handler(CommandHandler('start', start))
+    dispatcher.add_handler(CallbackQueryHandler(generate_link, pattern='^generate_link$'))
+    dispatcher.add_handler(CallbackQueryHandler(verify_completion, pattern='^verify_'))
+    dispatcher.add_handler(CallbackQueryHandler(show_wallet, pattern='^wallet$'))
+    dispatcher.add_handler(CallbackQueryHandler(show_referral, pattern='^referral$'))
+    dispatcher.add_handler(conv_handler)
+    
+    # Error handler
+    dispatcher.add_error_handler(error_handler)
+
+    # Start the Bot
+    PORT = int(os.environ.get('PORT', 8443))
+    HEROKU_APP_NAME = os.environ.get('HEROKU_APP_NAME')
+    
+    if HEROKU_APP_NAME:  # Running on Heroku
+        updater.start_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=TOKEN,
+            webhook_url=f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}"
+        )
+    else:  # Running locally
+        updater.start_polling()
+
+    updater.idle()
+
+if __name__ == '__main__':
     main()
