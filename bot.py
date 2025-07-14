@@ -10,8 +10,8 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
-    MessageHandler, # Import MessageHandler for handling text input
-    filters # Import filters for message handling
+    MessageHandler,
+    filters
 )
 import requests
 
@@ -45,6 +45,7 @@ MONGO_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017')
 client = MongoClient(MONGO_URI)
 db = client.get_database('earnbot')
 users = db.users
+user_states = db.user_states # A new collection for temporary user states
 
 # --- Admin ID ---
 ADMIN_ID = 7315805581 # Your specified Admin ID
@@ -60,29 +61,18 @@ LINK_COOLDOWN = 1  # minutes
 API_TOKEN = '4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0'
 SHORTS_API_BASE_URL = "https://dashboard.smallshorts.com/api"
 
-# Database setup
-def init_db():
-    users.create_index("user_id", unique=True)
-    users.create_index("referral_code", unique=True, sparse=True)
-    init_user_state_db() # Initialize user state collection
-init_db()
-
-# Admin State for multi-step commands
-# This helps track what the admin is currently trying to do (e.g., enter user ID for balance check)
-user_states = db.user_states # A new collection for temporary user states
-
+# Database setup functions
 def init_user_state_db():
+    """Initializes the user_states collection."""
     user_states.create_index("user_id", unique=True)
 
-def get_user_state(user_id):
-    state = user_states.find_one({"user_id": user_id})
-    return state.get("state") if state else None
+def init_db():
+    """Initializes all necessary database collections and indexes."""
+    users.create_index("user_id", unique=True)
+    users.create_index("referral_code", unique=True, sparse=True)
+    init_user_state_db() # Now this function is defined before it's called
+init_db()
 
-def set_user_state(user_id, state_name):
-    user_states.update_one({"user_id": user_id}, {"$set": {"state": state_name}}, upsert=True)
-
-def clear_user_state(user_id):
-    user_states.delete_one({"user_id": user_id})
 
 # Helper functions
 def get_user(user_id):
@@ -105,6 +95,16 @@ def get_user(user_id):
 
 def update_user(user_id, update_data):
     users.update_one({"user_id": user_id}, {"$set": update_data})
+
+def get_user_state(user_id):
+    state = user_states.find_one({"user_id": user_id})
+    return state.get("state") if state else None
+
+def set_user_state(user_id, state_name):
+    user_states.update_one({"user_id": user_id}, {"$set": {"state": state_name}}, upsert=True)
+
+def clear_user_state(user_id):
+    user_states.delete_one({"user_id": user_id})
 
 # Function to generate short link
 def generate_short_link(long_url):
@@ -212,8 +212,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(user_id)
     bot_username = (await context.bot.get_me()).username
 
-    # Clear any previous admin state
-    clear_user_state(user_id)
+    # Clear any previous admin state if a regular user clicks a button
+    if user_id != ADMIN_ID:
+        clear_user_state(user_id)
+
 
     if query.data == 'generate_link':
         if user['last_click'] and (datetime.utcnow() - user['last_click']) < timedelta(minutes=LINK_COOLDOWN):
@@ -290,13 +292,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- Admin Callbacks ---
     elif query.data == 'admin_get_balance':
-        set_user_state(user_id, 'GET_BALANCE_USER_ID')
-        await query.edit_message_text("Please send the User ID of the user whose balance you want to check.")
+        if user_id == ADMIN_ID:
+            set_user_state(user_id, 'GET_BALANCE_USER_ID')
+            await query.edit_message_text("Please send the User ID of the user whose balance you want to check.")
     elif query.data == 'admin_add_balance':
-        set_user_state(user_id, 'ADD_BALANCE_USER_ID')
-        await query.edit_message_text("Please send the User ID of the user to whom you want to add balance.")
+        if user_id == ADMIN_ID:
+            set_user_state(user_id, 'ADD_BALANCE_USER_ID')
+            await query.edit_message_text("Please send the User ID of the user to whom you want to add balance.")
     elif query.data == 'admin_main_menu':
-        await admin_menu(update, context) # Re-show admin menu
+        if user_id == ADMIN_ID:
+            await admin_menu(update, context) # Re-show admin menu
+    elif query.data == 'admin_withdrawals_placeholder':
+        if user_id == ADMIN_ID:
+            await query.edit_message_text(
+                "💸 Withdrawal requests will appear here soon!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+            )
     # --- End Admin Callbacks ---
 
 
@@ -307,6 +318,8 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 You are not authorized to use this command.")
         return
 
+    # Clear any existing admin state when starting /admin
+    clear_user_state(user_id)
     await admin_menu(update, context)
 
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -348,12 +361,19 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     f"Total Earned: ₹{target_user['total_earned']:.2f}\n"
                     f"Referrals: {target_user['referrals']}\n"
                     f"Referred By: {target_user['referred_by'] if target_user.get('referred_by') else 'N/A'}",
-                    parse_mode='Markdown'
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
                 )
             else:
-                await update.message.reply_text("User not found.")
+                await update.message.reply_text(
+                    "User not found.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                )
         except ValueError:
-            await update.message.reply_text("Invalid User ID. Please send a numeric User ID.")
+            await update.message.reply_text(
+                "Invalid User ID. Please send a numeric User ID.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+            )
         finally:
             clear_user_state(user_id) # Clear state after processing
 
@@ -364,20 +384,30 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             set_user_state(user_id, 'ADD_BALANCE_AMOUNT')
             await update.message.reply_text(f"User ID: `{target_user_id}`. Now, please send the amount to add.", parse_mode='Markdown')
         except ValueError:
-            await update.message.reply_text("Invalid User ID. Please send a numeric User ID.")
-            clear_user_state(user_id)
+            await update.message.reply_text(
+                "Invalid User ID. Please send a numeric User ID.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+            )
+            clear_user_state(user_id) # Clear state if invalid User ID
 
     elif current_state == 'ADD_BALANCE_AMOUNT':
         target_user_id = context.user_data.get('target_user_id_for_add')
         if not target_user_id:
-            await update.message.reply_text("Error: User ID not set for balance addition. Please start again from 'Add Balance to User'.")
+            await update.message.reply_text(
+                "Error: User ID not set for balance addition. Please start again from 'Add Balance to User'.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+            )
             clear_user_state(user_id)
             return
 
         try:
             amount_to_add = float(text_input)
             if amount_to_add <= 0:
-                await update.message.reply_text("Amount must be positive.")
+                await update.message.reply_text(
+                    "Amount must be positive.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                )
+                clear_user_state(user_id) # Clear state if invalid amount
                 return
 
             target_user = users.find_one({"user_id": target_user_id})
@@ -389,12 +419,19 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await update.message.reply_text(
                     f"Successfully added ₹{amount_to_add:.2f} to user `{target_user_id}`'s balance.\n"
                     f"New balance: ₹{target_user['balance'] + amount_to_add:.2f}",
-                    parse_mode='Markdown'
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
                 )
             else:
-                await update.message.reply_text("User not found.")
+                await update.message.reply_text(
+                    "User not found.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                )
         except ValueError:
-            await update.message.reply_text("Invalid amount. Please send a numeric value.")
+            await update.message.reply_text(
+                "Invalid amount. Please send a numeric value.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+            )
         finally:
             clear_user_state(user_id) # Clear state after processing
             if 'target_user_id_for_add' in context.user_data:
@@ -416,9 +453,10 @@ def run_bot():
 
         # Add handlers
         application.add_handler(CommandHandler('start', start))
-        application.add_handler(CommandHandler('admin', admin_command, filters=filters.User(ADMIN_ID))) # Admin command handler
+        application.add_handler(CommandHandler('admin', admin_command, filters=filters.User(ADMIN_ID)))
         application.add_handler(CallbackQueryHandler(button_handler))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_admin_input)) # Admin text input handler
+        # Admin text input handler should only process messages when an admin is in a specific state
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_admin_input))
 
         application.add_error_handler(error_handler)
 
