@@ -8,9 +8,6 @@ from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    ConversationHandler,
-    MessageHandler,
-    filters,
     ContextTypes,
 )
 
@@ -43,7 +40,6 @@ db = client.get_database('earnbot')
 users = db.users
 
 # Bot constants
-WAITING_FOR_UPI = 1
 MIN_WITHDRAWAL = 70
 EARN_PER_LINK = 0.15
 REFERRAL_BONUS = 0.50
@@ -78,7 +74,7 @@ def update_user(user_id, update_data):
     users.update_one({"user_id": user_id}, {"$set": update_data})
 
 # Bot handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = get_user(user_id)
     
@@ -106,7 +102,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
@@ -134,6 +130,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"💰 You earned ₹{EARN_PER_LINK}. New balance: ₹{new_balance:.2f}\n"
             f"⏳ Next link available in {LINK_COOLDOWN} minutes.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+        )
     
     elif query.data == 'wallet':
         await query.edit_message_text(
@@ -146,7 +143,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💵 Withdraw", callback_data='withdraw')],
                 [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]
-            ]))
+            ])
+        )
     
     elif query.data == 'referral':
         await query.edit_message_text(
@@ -156,7 +154,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"💰 Earn ₹{REFERRAL_BONUS} for each friend who joins using your link!\n"
             f"👥 Total referrals: {user['referrals']}\n"
             f"💸 Earned from referrals: ₹{user['referral_earnings']:.2f}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]]))
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
     
     elif query.data == 'back_to_main':
         keyboard = [
@@ -168,9 +166,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "🎉 Welcome to Earn Bot!\n"
             "Solve links and earn ₹0.15 per link!\n"
             "Minimum withdrawal: ₹70",
-            reply_markup=InlineKeyboardMarkup(keyboard))
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Exception while handling update:", exc_info=context.error)
     if update.callback_query:
         await update.callback_query.message.reply_text('⚠️ An error occurred. Please try again.')
