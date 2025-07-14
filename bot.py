@@ -116,7 +116,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if query.data == 'generate_link':
         # Check if user is on cooldown
         if user['last_click'] and (datetime.utcnow() - user['last_click']) < timedelta(minutes=LINK_COOLDOWN):
-            remaining = (user['last_click'] + timedelta(minutes=LINK_COOLDOWN) - datetime.utcnow()
+            remaining = (user['last_click'] + timedelta(minutes=LINK_COOLDOWN)) - datetime.utcnow()
             await query.edit_message_text(f"⏳ Please wait {int(remaining.seconds/60)} minutes before generating another link.")
             return
         
