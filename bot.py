@@ -146,7 +146,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
     
-    elif query.data == 'referral':
+        elif query.data == 'referral':
         await query.edit_message_text(
             f"👥 Referral Program\n\n"
             f"🔗 Your referral link:\n"
@@ -155,18 +155,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👥 Total referrals: {user['referrals']}\n"
             f"💸 Earned from referrals: ₹{user['referral_earnings']:.2f}",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
-    
-    elif query.data == 'back_to_main':
-        keyboard = [
-            [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')],
-            [InlineKeyboardButton("📊 My Wallet", callback_data='wallet')],
-            [InlineKeyboardButton("👥 Refer Friends", callback_data='referral')]
-        ]
-        await query.edit_message_text(
-            "🎉 Welcome to Earn Bot!\n"
-            "Solve links and earn ₹0.15 per link!\n"
-            "Minimum withdrawal: ₹70",
-            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
