@@ -1,6 +1,7 @@
 import os
 import logging
 from datetime import datetime, timedelta
+from flask import Flask
 from pymongo import MongoClient
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -12,6 +13,17 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
+
+# Initialize Flask app
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "EarnBot is running!"
+
+def run_flask():
+    port = int(os.environ.get('FLASK_PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
 
 # Enable logging
 logging.basicConfig(
@@ -94,7 +106,69 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# [Rest of your handler functions...]
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    user = get_user(user_id)
+    
+    if query.data == 'generate_link':
+        # Check if user is on cooldown
+        if user['last_click'] and (datetime.utcnow() - user['last_click']) < timedelta(minutes=LINK_COOLDOWN):
+            remaining = (user['last_click'] + timedelta(minutes=LINK_COOLDOWN) - datetime.utcnow()
+            await query.edit_message_text(f"⏳ Please wait {int(remaining.seconds/60)} minutes before generating another link.")
+            return
+        
+        # Generate a new link and update user balance
+        new_balance = user['balance'] + EARN_PER_LINK
+        update_user(user_id, {
+            "balance": new_balance,
+            "total_earned": user['total_earned'] + EARN_PER_LINK,
+            "last_click": datetime.utcnow()
+        })
+        
+        await query.edit_message_text(
+            f"🔗 Here's your link to solve:\n\n"
+            f"https://example.com/link/{user_id}\n\n"
+            f"💰 You earned ₹{EARN_PER_LINK}. New balance: ₹{new_balance:.2f}\n"
+            f"⏳ Next link available in {LINK_COOLDOWN} minutes.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+    
+    elif query.data == 'wallet':
+        await query.edit_message_text(
+            f"💰 Your Wallet\n\n"
+            f"🪙 Balance: ₹{user['balance']:.2f}\n"
+            f"📊 Total Earned: ₹{user['total_earned']:.2f}\n"
+            f"💸 Withdrawn: ₹{user['withdrawn']:.2f}\n"
+            f"👥 Referrals: {user['referrals']} (₹{user['referral_earnings']:.2f})\n\n"
+            f"💵 Minimum withdrawal: ₹{MIN_WITHDRAWAL}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💵 Withdraw", callback_data='withdraw')],
+                [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]
+            ]))
+    
+    elif query.data == 'referral':
+        await query.edit_message_text(
+            f"👥 Referral Program\n\n"
+            f"🔗 Your referral link:\n"
+            f"https://t.me/{(await context.bot.get_me()).username}?start={user['referral_code']}\n\n"
+            f"💰 Earn ₹{REFERRAL_BONUS} for each friend who joins using your link!\n"
+            f"👥 Total referrals: {user['referrals']}\n"
+            f"💸 Earned from referrals: ₹{user['referral_earnings']:.2f}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]]))
+    
+    elif query.data == 'back_to_main':
+        keyboard = [
+            [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')],
+            [InlineKeyboardButton("📊 My Wallet", callback_data='wallet')],
+            [InlineKeyboardButton("👥 Refer Friends", callback_data='referral')]
+        ]
+        await query.edit_message_text(
+            "🎉 Welcome to Earn Bot!\n"
+            "Solve links and earn ₹0.15 per link!\n"
+            "Minimum withdrawal: ₹70",
+            reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Exception while handling update:", exc_info=context.error)
@@ -103,14 +177,14 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     elif update.message:
         await update.message.reply_text('⚠️ An error occurred. Please try again.')
 
-def main() -> None:
+def run_bot():
     try:
         application = Application.builder().token(TOKEN).build()
 
         # Add handlers
         application.add_handler(CommandHandler('start', start))
-        # [Add other handlers...]
-
+        application.add_handler(CallbackQueryHandler(button_handler))
+        
         application.add_error_handler(error_handler)
 
         PORT = int(os.environ.get('PORT', 8443))
@@ -131,4 +205,11 @@ def main() -> None:
         raise
 
 if __name__ == '__main__':
-    main()
+    # Start Flask in a separate thread
+    from threading import Thread
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    # Start the Telegram bot
+    run_bot()
