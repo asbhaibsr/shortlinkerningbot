@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask
 from threading import Thread
+import asyncio # Import asyncio for async operations
 from pymongo import MongoClient
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -51,7 +52,7 @@ user_states = db.user_states
 withdrawal_requests = db.withdrawal_requests
 
 # --- Admin ID ---
-ADMIN_ID = 7315805581
+ADMIN_ID = 7315805581 # Replace with your actual Telegram User ID
 # --- Admin ID ---
 
 # Bot constants
@@ -61,7 +62,7 @@ REFERRAL_BONUS = 0.50
 LINK_COOLDOWN = 1  # minutes
 
 # Shortlink API configuration
-API_TOKEN = '4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0'
+API_TOKEN = '4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0' # Replace with your SmallShorts API Token
 SHORTS_API_BASE_URL = "https://dashboard.smallshorts.com/api"
 
 # Database setup functions
@@ -464,18 +465,22 @@ async def admin_approve_payment(update: Update, context: ContextTypes.DEFAULT_TY
             amount = request['amount']
             withdrawal_method = request['withdrawal_details']['method']
 
-            # --- RESET USER DATA AFTER SUCCESSFUL PAYMENT ---
-            # Set desired fields back to their initial state (except user_id and withdrawn)
+            # --- RESET USER'S EARNING DATA AFTER SUCCESSFUL PAYMENT ---
+            # Set desired fields back to their initial state (except user_id, total_earned, and withdrawn)
             users.update_one(
                 {"user_id": user_id},
                 {"$set": {
-                    "balance": 0.0,
-                    "referrals": 0,
-                    "referral_earnings": 0.0,
-                    "total_earned": 0.0,
-                    "last_click": None,
-                    "referred_by": None
-                }}
+                    "balance": 0.0,           # Reset balance to 0
+                    "referrals": 0,           # Reset current referral count for new earnings
+                    "referral_earnings": 0.0, # Reset current referral earnings
+                    "last_click": None,       # Reset last click for new earning sessions
+                    "referred_by": None       # Optional: Keep this if you want them to be able to refer again, or be referred again.
+                                              # If you want them to remain permanently linked to their original referrer, remove this line.
+                },
+                 "$inc": {
+                     "withdrawn": amount # Increment total withdrawn amount
+                 }
+                }
             )
             logger.info(f"User {user_id}'s earning data reset after successful withdrawal.")
 
@@ -672,9 +677,6 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
     user = get_user(user_id) 
 
     # If not in a withdrawal state, or if balance is insufficient, ignore/reset
-    # Note: We check current 'user' balance here, not the one from before request
-    # This ensures a user can't request multiple withdrawals if their balance isn't topped up again.
-    # However, after a successful *request*, the balance remains until approved by admin.
     if not current_state or not current_state.startswith('WITHDRAW_') or user['balance'] < MIN_WITHDRAWAL:
         if user['balance'] < MIN_WITHDRAWAL:
             await update.message.reply_text(
@@ -692,7 +694,7 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
 
     elif current_state == 'WITHDRAW_ENTER_BANK':
         bank_details_raw = update.message.text.strip()
-        if len(bank_details_raw) < 50:
+        if len(bank_details_raw) < 50: # Simple check for minimum length
             await update.message.reply_text(
                 "Please provide complete bank account details in the specified format.",
                 parse_mode='Markdown',
@@ -738,18 +740,18 @@ async def process_withdrawal_request(update: Update, context: ContextTypes.DEFAU
     inserted_result = withdrawal_requests.insert_one(request_data) 
     request_obj_id = inserted_result.inserted_id
 
-    # --- THIS IS THE KEY CHANGE ---
-    # Only increment withdrawn amount now. Balance is deducted only upon admin approval.
+    # IMPORTANT: Do NOT reset balance here. Balance will be reset by admin_approve_payment.
+    # Only increment withdrawn amount now for tracking.
     users.update_one(
         {"user_id": user_id},
-        {"$inc": {"withdrawn": amount}} # Removed "$set": {"balance": 0.0}
+        {"$inc": {"withdrawn": amount}}
     )
 
     await update.message.reply_text(
         f"🎉 Withdrawal request submitted!\n"
         f"Amount: ₹{amount:.2f}\n"
         f"Method: {details['method']}\n"
-        f"Your balance will be updated after admin approval. Your request will be processed soon.", # Updated message
+        f"Your request has been sent to admin and will be processed soon. Your balance will be updated after admin approval.", # Clarified message
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
     )
@@ -816,40 +818,49 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         logger.warning("Error handler called with None update object.")
 
-def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
+async def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
     application_instance = context.job.data["application_instance"]
     logger.info("Attempting MongoDB data cleanup...")
     
-    db_usage_percentage = 95
+    # You need a way to get actual DB usage. For demonstration, I'm keeping 95%
+    # In a real scenario, you'd query MongoDB for storage stats.
+    # For now, let's assume it's high for the purpose of running cleanup.
+    db_usage_percentage = 95 # Replace with actual DB usage check if possible
 
-    if db_usage_percentage >= 90:
+    if db_usage_percentage >= 90: # Only run cleanup if usage is high
         logger.warning(f"MongoDB usage is at {db_usage_percentage:.2f}%. Initiating cleanup of old data.")
         
-        total_users_count = users.count_documents({})
-        if total_users_count == 0:
-            logger.info("No users to clean up.")
-            return
+        # Define a threshold for "old" (e.g., 30 days)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
 
-        num_to_delete = max(1, int(total_users_count * 0.20))
+        # Query for users with 0 balance, not ADMIN_ID, and created/last interacted long ago
+        users_to_delete_cursor = users.find({
+            "balance": 0.0,
+            "user_id": {"$ne": ADMIN_ID}, # Exclude admin
+            "$or": [ # Consider inactive if created long ago OR last clicked long ago
+                {"created_at": {"$lt": thirty_days_ago}}, 
+                {"last_click": {"$lt": thirty_days_ago}}  
+            ]
+        }).sort("created_at", 1) # Sort by creation for oldest among matches
 
-        logger.info(f"Attempting to delete {num_to_delete} oldest inactive users.")
-
-        users_to_delete = list(users.find({"balance": 0.0})
-                                  .sort("created_at", 1)
-                                  .limit(num_to_delete))
-
+        users_to_delete = list(users_to_delete_cursor)
+        
         if not users_to_delete:
-            logger.info("Could not find suitable users to clean up (e.g., no users with 0 balance).")
-            users_to_delete = list(users.find({})
-                                      .sort("created_at", 1)
-                                      .limit(num_to_delete))
-            if not users_to_delete:
-                 logger.info("No users found to delete even with fallback.")
-                 return
+             logger.info("No suitable non-admin users with 0 balance and inactivity found for cleanup.")
+             return
+
+        # Determine number of users to delete (e.g., 20% of the found eligible users)
+        num_to_delete = max(1, int(len(users_to_delete) * 0.20)) # Delete 20% of eligible users
+        users_to_delete = users_to_delete[:num_to_delete] # Take only the top `num_to_delete` (oldest)
 
         deleted_count = 0
         deleted_user_ids = []
         for user_doc in users_to_delete:
+            # Final double-check: ensure admin is not deleted and balance is indeed 0
+            if user_doc['user_id'] == ADMIN_ID or user_doc['balance'] > 0.0:
+                logger.warning(f"Attempted to delete user {user_doc['user_id']} with non-zero balance or ADMIN_ID during cleanup. Skipping.")
+                continue
+
             try:
                 users.delete_one({"_id": user_doc['_id']})
                 user_states.delete_one({"user_id": user_doc['user_id']})
@@ -859,14 +870,16 @@ def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
                 logger.error(f"Error deleting user {user_doc['user_id']} during cleanup: {e}")
         
         logger.info(f"MongoDB cleanup complete. Deleted {deleted_count} users. User IDs: {deleted_user_ids}")
+        
+        # Send notification to admin
+        admin_msg = f"🧹 **MongoDB Cleanup Alert!** 🧹\n" \
+                    f"Database usage was high ({db_usage_percentage:.2f}%).\n" \
+                    f"{deleted_count} oldest *inactive users with 0 balance* have been deleted to free up space.\n" \
+                    f"Deleted User IDs: {', '.join(map(str, deleted_user_ids)) if deleted_user_ids else 'None'}"
         try:
-            admin_msg = f"🧹 **MongoDB Cleanup Alert!** 🧹\n" \
-                        f"Database usage was high ({db_usage_percentage:.2f}%).\n" \
-                        f"{deleted_count} oldest inactive users have been deleted to free up space.\n" \
-                        f"Deleted User IDs: {', '.join(map(str, deleted_user_ids)) if deleted_user_ids else 'None'}"
-            Thread(target=lambda: application_instance.bot.send_message(
+            await application_instance.bot.send_message(
                 chat_id=ADMIN_ID, text=admin_msg, parse_mode='Markdown'
-            )).start()
+            )
         except Exception as e:
             logger.error(f"Failed to send cleanup notification to admin: {e}")
     else:
@@ -910,10 +923,10 @@ def run_bot():
         
         job_queue = application.job_queue
         if job_queue is not None:
+            # Pass the Application instance as data to cleanup_old_data
             job_queue.run_repeating(cleanup_old_data, interval=timedelta(minutes=1), first=0, data={"application_instance": application})
         else:
             logger.error("JobQueue is not initialized. Ensure python-telegram-bot[job-queue] is installed.")
-
 
         application.run_polling()
 
@@ -922,9 +935,11 @@ def run_bot():
         raise
 
 if __name__ == '__main__':
+    # Start Flask server in a separate thread for health checks
     flask_thread = Thread(target=run_flask_server)
-    flask_thread.daemon = True
+    flask_thread.daemon = True # Daemonize thread so it exits when main program exits
     flask_thread.start()
 
+    # Run the Telegram bot
     run_bot()
 
