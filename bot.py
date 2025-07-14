@@ -46,6 +46,7 @@ client = MongoClient(MONGO_URI)
 db = client.get_database('earnbot')
 users = db.users
 user_states = db.user_states # A new collection for temporary user states
+withdrawal_requests = db.withdrawal_requests # New collection for withdrawal requests
 
 # --- Admin ID ---
 ADMIN_ID = 7315805581 # Your specified Admin ID
@@ -66,11 +67,18 @@ def init_user_state_db():
     """Initializes the user_states collection."""
     user_states.create_index("user_id", unique=True)
 
+def init_withdrawal_requests_db():
+    """Initializes the withdrawal_requests collection."""
+    withdrawal_requests.create_index("user_id")
+    withdrawal_requests.create_index("status")
+    withdrawal_requests.create_index("timestamp")
+
 def init_db():
     """Initializes all necessary database collections and indexes."""
     users.create_index("user_id", unique=True)
     users.create_index("referral_code", unique=True, sparse=True)
-    init_user_state_db() # Now this function is defined before it's called
+    init_user_state_db()
+    init_withdrawal_requests_db() # Initialize withdrawal requests collection
 init_db()
 
 
@@ -138,7 +146,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(user_id)
     bot_username = (await context.bot.get_me()).username
 
-    # Clear any previous admin state
+    # Clear any previous user state (important for consistent flow)
     clear_user_state(user_id)
 
     if context.args:
@@ -212,7 +220,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(user_id)
     bot_username = (await context.bot.get_me()).username
 
-    # Clear any previous admin state if a regular user clicks a button
+    # Clear user state if a non-admin clicks any button
     if user_id != ADMIN_ID:
         clear_user_state(user_id)
 
@@ -285,10 +293,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == 'withdraw':
-        await query.edit_message_text(
-            "⚠️ Withdrawal is not yet implemented. Please check back later!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
-        )
+        if user['balance'] >= MIN_WITHDRAWAL:
+            set_user_state(user_id, 'WITHDRAW_ENTER_UPI')
+            await query.edit_message_text(
+                "✅ You are eligible for withdrawal!\n"
+                "Please send your **UPI ID** to proceed with the withdrawal.",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
+            )
+        else:
+            await query.edit_message_text(
+                f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+            )
+
 
     # --- Admin Callbacks ---
     elif query.data == 'admin_get_balance':
@@ -304,8 +322,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await admin_menu(update, context) # Re-show admin menu
     elif query.data == 'admin_withdrawals_placeholder':
         if user_id == ADMIN_ID:
+            # Here you would typically fetch and display pending withdrawal requests
             await query.edit_message_text(
-                "💸 Withdrawal requests will appear here soon!",
+                "💸 Withdrawal requests will appear here soon! (Admin needs to manually check and process them).",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
             )
     # --- End Admin Callbacks ---
@@ -341,6 +360,32 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚙️ Admin Panel Options:",
             reply_markup=reply_markup
         )
+
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("🚫 You are not authorized to use this command.")
+        return
+    set_user_state(user_id, 'BROADCAST_MESSAGE')
+    await update.message.reply_text(
+        "📝 Please send the message you want to broadcast to all users.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel Broadcast", callback_data='admin_main_menu')]])
+    )
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("🚫 You are not authorized to use this command.")
+        return
+    
+    total_users = users.count_documents({})
+    
+    await update.message.reply_text(
+        f"📊 Bot Statistics:\n"
+        f"Total Users: {total_users}\n"
+        # Add more stats here if needed, e.g., total earned, total withdrawn
+    )
+
 
 async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -436,8 +481,85 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             clear_user_state(user_id) # Clear state after processing
             if 'target_user_id_for_add' in context.user_data:
                 del context.user_data['target_user_id_for_add']
+    
+    elif current_state == 'BROADCAST_MESSAGE':
+        message_to_broadcast = text_input
+        sent_count = 0
+        failed_count = 0
+        all_users = users.find({}, {"user_id": 1}) # Fetch only user_id
 
-# --- End Admin Handlers ---
+        for user_doc in all_users:
+            try:
+                await context.bot.send_message(chat_id=user_doc['user_id'], text=message_to_broadcast)
+                sent_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.warning(f"Failed to send broadcast to user {user_doc['user_id']}: {e}")
+        
+        await update.message.reply_text(
+            f"✅ Broadcast complete!\n"
+            f"Sent to: {sent_count} users.\n"
+            f"Failed for: {failed_count} users.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+        )
+        clear_user_state(user_id)
+
+
+# --- User Withdrawal Input Handler ---
+async def handle_withdrawal_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_state = get_user_state(user_id)
+    text_input = update.message.text
+
+    if current_state == 'WITHDRAW_ENTER_UPI':
+        upi_id = text_input.strip()
+        user = get_user(user_id)
+
+        if user['balance'] >= MIN_WITHDRAWAL:
+            # Record the withdrawal request
+            request_data = {
+                "user_id": user_id,
+                "amount": user['balance'],
+                "upi_id": upi_id,
+                "timestamp": datetime.utcnow(),
+                "status": "pending" # You can add 'approved', 'rejected' later
+            }
+            withdrawal_requests.insert_one(request_data)
+
+            # Deduct balance and update withdrawn amount
+            users.update_one(
+                {"user_id": user_id},
+                {"$set": {"balance": 0.0}, "$inc": {"withdrawn": user['balance']}}
+            )
+
+            await update.message.reply_text(
+                f"🎉 Withdrawal request submitted!\n"
+                f"Amount: ₹{request_data['amount']:.2f}\n"
+                f"UPI ID: `{upi_id}`\n"
+                f"Your balance has been reset to ₹0.00. Your request will be processed soon.",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
+            )
+
+            # Notify admin
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🚨 New Withdrawal Request!\n"
+                     f"User ID: `{user_id}`\n"
+                     f"Amount: ₹{request_data['amount']:.2f}\n"
+                     f"UPI ID: `{upi_id}`",
+                parse_mode='Markdown'
+            )
+
+        else:
+            await update.message.reply_text(
+                f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
+            )
+        clear_user_state(user_id) # Clear state after processing
+
+# --- End User Withdrawal Input Handler ---
+
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Exception while handling update:", exc_info=context.error)
@@ -454,9 +576,15 @@ def run_bot():
         # Add handlers
         application.add_handler(CommandHandler('start', start))
         application.add_handler(CommandHandler('admin', admin_command, filters=filters.User(ADMIN_ID)))
+        application.add_handler(CommandHandler('broadcast', broadcast_command, filters=filters.User(ADMIN_ID))) # New: Broadcast command
+        application.add_handler(CommandHandler('stats', stats_command, filters=filters.User(ADMIN_ID))) # New: Stats command
         application.add_handler(CallbackQueryHandler(button_handler))
-        # Admin text input handler should only process messages when an admin is in a specific state
+        
+        # Handler for admin text inputs based on state
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_admin_input))
+        # Handler for user withdrawal input based on state (must be before generic text handler if one exists)
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.User(ADMIN_ID), handle_withdrawal_input))
+
 
         application.add_error_handler(error_handler)
 
