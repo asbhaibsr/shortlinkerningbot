@@ -4,13 +4,13 @@ from datetime import datetime, timedelta
 from pymongo import MongoClient
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     CallbackQueryHandler,
     ConversationHandler,
     MessageHandler,
-    Filters,
-    CallbackContext,
+    filters,
+    ContextTypes,
 )
 
 # Enable logging
@@ -64,7 +64,7 @@ def update_user(user_id, update_data):
     users.update_one({"user_id": user_id}, {"$set": update_data})
 
 # Bot handlers
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     user = get_user(user_id)
     
@@ -86,16 +86,16 @@ def start(update: Update, context: CallbackContext) -> None:
         [InlineKeyboardButton("👥 Refer Friends", callback_data='referral')]
     ]
     
-    update.message.reply_text(
+    await update.message.reply_text(
         "🎉 Welcome to Earn Bot!\n"
         "Solve links and earn ₹0.15 per link!\n"
         "Minimum withdrawal: ₹70",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-def generate_link(update: Update, context: CallbackContext) -> None:
+async def generate_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     user_id = update.effective_user.id
     user = get_user(user_id)
@@ -103,7 +103,7 @@ def generate_link(update: Update, context: CallbackContext) -> None:
     # Check cooldown
     if user['last_click'] and (datetime.utcnow() - user['last_click']) < timedelta(minutes=LINK_COOLDOWN):
         remaining = (user['last_click'] + timedelta(minutes=LINK_COOLDOWN) - datetime.utcnow()).seconds // 60
-        query.edit_message_text(
+        await query.edit_message_text(
             f"⏳ Please wait {remaining} minutes before generating another link!",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📊 My Wallet", callback_data='wallet')]
@@ -116,11 +116,7 @@ def generate_link(update: Update, context: CallbackContext) -> None:
     redirect_url = f"https://t.me/{context.bot.username}?start=verify_{user_id}"
     shortlink = f"https://smallshorts.example.com/mock-link-for-{user_id}"
     
-    # Actual API call would look like:
-    # response = requests.get(f"https://smallshorts.com/api?api={SHORTS_API_KEY}&url={redirect_url}")
-    # shortlink = response.json().get('shortenedUrl', 'Error generating link')
-    
-    query.edit_message_text(
+    await query.edit_message_text(
         f"🔗 Solve this link to earn ₹{EARN_PER_LINK}:\n{shortlink}\n\n"
         "After solving, return here and click 'I completed'",
         reply_markup=InlineKeyboardMarkup([
@@ -128,9 +124,9 @@ def generate_link(update: Update, context: CallbackContext) -> None:
         ])
     )
 
-def verify_completion(update: Update, context: CallbackContext) -> None:
+async def verify_completion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     user_id = update.effective_user.id
     user = get_user(user_id)
@@ -139,7 +135,7 @@ def verify_completion(update: Update, context: CallbackContext) -> None:
     is_verified = True  # Replace with actual verification
     
     if not is_verified:
-        query.edit_message_text(
+        await query.edit_message_text(
             "❌ Link not completed yet! Please solve the link first.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔗 Get Link Again", callback_data='generate_link')]
@@ -154,7 +150,7 @@ def verify_completion(update: Update, context: CallbackContext) -> None:
         "last_click": datetime.utcnow()
     })
     
-    query.edit_message_text(
+    await query.edit_message_text(
         f"✅ ₹{EARN_PER_LINK} Credited! New balance: ₹{new_balance:.2f}",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Next Link", callback_data='generate_link')],
@@ -162,9 +158,9 @@ def verify_completion(update: Update, context: CallbackContext) -> None:
         ])
     )
 
-def show_wallet(update: Update, context: CallbackContext) -> None:
+async def show_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     user_id = update.effective_user.id
     user = get_user(user_id)
@@ -173,7 +169,7 @@ def show_wallet(update: Update, context: CallbackContext) -> None:
     if user['balance'] >= MIN_WITHDRAWAL:
         keyboard.append([InlineKeyboardButton("💰 Withdraw", callback_data='withdraw')])
     
-    query.edit_message_text(
+    await query.edit_message_text(
         f"💼 Your Wallet\n\n"
         f"Balance: ₹{user['balance']:.2f}\n"
         f"Total Earned: ₹{user['total_earned']:.2f}\n"
@@ -183,15 +179,15 @@ def show_wallet(update: Update, context: CallbackContext) -> None:
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-def withdraw(update: Update, context: CallbackContext) -> int:
+async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     user_id = update.effective_user.id
     user = get_user(user_id)
     
     if user['balance'] < MIN_WITHDRAWAL:
-        query.edit_message_text(
+        await query.edit_message_text(
             f"❌ You need at least ₹{MIN_WITHDRAWAL} to withdraw. Current balance: ₹{user['balance']:.2f}",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')]
@@ -199,20 +195,20 @@ def withdraw(update: Update, context: CallbackContext) -> int:
         )
         return ConversationHandler.END
     
-    query.edit_message_text(
+    await query.edit_message_text(
         "📤 Please send your UPI ID for withdrawal (e.g., 1234567890@ybl):\n\n"
         "Type /cancel to cancel withdrawal"
     )
     return WAITING_FOR_UPI
 
-def process_upi(update: Update, context: CallbackContext) -> int:
+async def process_upi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     upi_id = update.message.text
     user = get_user(user_id)
     
     # Simple UPI ID validation
     if '@' not in upi_id or len(upi_id) < 5:
-        update.message.reply_text("❌ Invalid UPI ID. Please send a valid UPI ID (e.g., 1234567890@ybl)")
+        await update.message.reply_text("❌ Invalid UPI ID. Please send a valid UPI ID (e.g., 1234567890@ybl)")
         return WAITING_FOR_UPI
     
     # Process withdrawal
@@ -222,8 +218,7 @@ def process_upi(update: Update, context: CallbackContext) -> int:
         "withdrawn": user['withdrawn'] + amount
     })
     
-    # In production, add your payment processing here
-    update.message.reply_text(
+    await update.message.reply_text(
         f"✅ Withdrawal request for ₹{amount:.2f} to {upi_id} submitted!\n"
         "Processing may take 24-48 hours.\n\n"
         "Use /start to return to main menu"
@@ -231,49 +226,48 @@ def process_upi(update: Update, context: CallbackContext) -> int:
     
     return ConversationHandler.END
 
-def cancel_withdrawal(update: Update, context: CallbackContext) -> int:
-    update.message.reply_text("❌ Withdrawal cancelled.")
+async def cancel_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("❌ Withdrawal cancelled.")
     return ConversationHandler.END
 
-def show_referral(update: Update, context: CallbackContext) -> None:
+async def show_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     user_id = update.effective_user.id
     user = get_user(user_id)
     
     ref_link = f"https://t.me/{context.bot.username}?start={user['referral_code']}"
     
-    query.edit_message_text(
+    await query.edit_message_text(
         f"👥 Referral Program\n\n"
         f"Invite friends and earn ₹{REFERRAL_BONUS} per referral!\n\n"
         f"Your referral link:\n{ref_link}\n\n"
         "When someone joins using your link and earns ₹5, you get ₹0.50 bonus!"
     )
 
-def error_handler(update: Update, context: CallbackContext) -> None:
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
     
     if update.callback_query:
-        update.callback_query.message.reply_text('⚠️ An error occurred. Please try again.')
+        await update.callback_query.message.reply_text('⚠️ An error occurred. Please try again.')
     else:
-        update.message.reply_text('⚠️ An error occurred. Please try again.')
+        await update.message.reply_text('⚠️ An error occurred. Please try again.')
 
 def main() -> None:
-    # Create the Updater and pass it your bot's token.
+    # Create the Application and pass it your bot's token.
     TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     if not TOKEN:
         raise ValueError("No TELEGRAM_BOT_TOKEN environment variable set")
     
-    updater = Updater(TOKEN)
-    dispatcher = updater.dispatcher
+    application = Application.builder().token(TOKEN).build()
 
     # Add conversation handler for withdrawals
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(withdraw, pattern='^withdraw$')],
         states={
             WAITING_FOR_UPI: [
-                MessageHandler(Filters.text & ~Filters.command, process_upi),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, process_upi),
                 CommandHandler('cancel', cancel_withdrawal)
             ],
         },
@@ -281,32 +275,29 @@ def main() -> None:
     )
 
     # Register handlers
-    dispatcher.add_handler(CommandHandler('start', start))
-    dispatcher.add_handler(CallbackQueryHandler(generate_link, pattern='^generate_link$'))
-    dispatcher.add_handler(CallbackQueryHandler(verify_completion, pattern='^verify_'))
-    dispatcher.add_handler(CallbackQueryHandler(show_wallet, pattern='^wallet$'))
-    dispatcher.add_handler(CallbackQueryHandler(show_referral, pattern='^referral$'))
-    dispatcher.add_handler(conv_handler)
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CallbackQueryHandler(generate_link, pattern='^generate_link$'))
+    application.add_handler(CallbackQueryHandler(verify_completion, pattern='^verify_'))
+    application.add_handler(CallbackQueryHandler(show_wallet, pattern='^wallet$'))
+    application.add_handler(CallbackQueryHandler(show_referral, pattern='^referral$'))
+    application.add_handler(conv_handler)
     
     # Error handler
-    dispatcher.add_error_handler(error_handler)
+    application.add_error_handler(error_handler)
 
     # Start the Bot
     PORT = int(os.environ.get('PORT', 8443))
     HEROKU_APP_NAME = os.environ.get('HEROKU_APP_NAME')
     
     if HEROKU_APP_NAME:  # Running on production
-        updater.start_webhook(
+        application.run_webhook(
             listen="0.0.0.0",
             port=PORT,
             url_path=TOKEN,
             webhook_url=f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}"
         )
-        updater.bot.set_webhook(f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}")
     else:  # Running locally
-        updater.start_polling()
-
-    updater.idle()
+        application.run_polling()
 
 if __name__ == '__main__':
     main()
