@@ -10,6 +10,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
+import requests # requests लाइब्रेरी को इम्पोर्ट किया गया है
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -45,6 +46,11 @@ EARN_PER_LINK = 0.15
 REFERRAL_BONUS = 0.50
 LINK_COOLDOWN = 5  # minutes
 
+# Shortlink API configuration
+# आपकी SmallShorts.com API token सीधे कोड में डाली गई है
+API_TOKEN = '4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0'
+SHORTS_API_BASE_URL = "https://dashboard.smallshorts.com/api"
+
 # Database setup
 def init_db():
     users.create_index("user_id", unique=True)
@@ -72,6 +78,33 @@ def get_user(user_id):
 
 def update_user(user_id, update_data):
     users.update_one({"user_id": user_id}, {"$set": update_data})
+
+# Function to generate short link
+def generate_short_link(long_url):
+    try:
+        params = {
+            'api': API_TOKEN,
+            'url': long_url
+        }
+        response = requests.get(SHORTS_API_BASE_URL, params=params)
+        response.raise_for_status() # HTTP errors के लिए
+        result = response.json()
+
+        if result.get('status') == 'error':
+            logger.error(f"SmallShorts API Error: {result.get('message')}")
+            return None
+        elif result.get('shortenedUrl'):
+            return result['shortenedUrl']
+        else:
+            logger.error(f"Unexpected SmallShorts API response: {result}")
+            return None
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error connecting to SmallShorts API: {e}")
+        return None
+    except ValueError as e:
+        logger.error(f"Error parsing SmallShorts API response (not JSON): {e}")
+        return None
+
 
 # Bot handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -116,6 +149,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"⏳ Please wait {int(remaining.seconds/60)} minutes before generating another link.")
             return
         
+        # Original destination link (जिसे आप छोटा करना चाहते हैं)
+        # आपको इस लिंक को अपनी वास्तविक earning website के लिंक से बदलना होगा
+        destination_link = f"https://yourrealearningwebsite.com/task/{user_id}" 
+        
+        # Shortlink generate करें
+        short_link = generate_short_link(destination_link)
+
+        if not short_link:
+            await query.edit_message_text(
+                "❌ Link generate करने में समस्या हुई। कृपया बाद में पुनः प्रयास करें।"
+            )
+            return
+
         # Generate a new link and update user balance
         new_balance = user['balance'] + EARN_PER_LINK
         update_user(user_id, {
@@ -126,7 +172,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             f"🔗 Here's your link to solve:\n\n"
-            f"https://example.com/link/{user_id}\n\n"
+            f"{short_link}\n\n" # <-- यहां शॉर्टलिंक दिखाएंगे
             f"💰 You earned ₹{EARN_PER_LINK}. New balance: ₹{new_balance:.2f}\n"
             f"⏳ Next link available in {LINK_COOLDOWN} minutes.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
@@ -146,7 +192,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
     
-        elif query.data == 'referral':
+    elif query.data == 'referral':
         await query.edit_message_text(
             f"👥 Referral Program\n\n"
             f"🔗 Your referral link:\n"
@@ -155,6 +201,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👥 Total referrals: {user['referrals']}\n"
             f"💸 Earned from referrals: ₹{user['referral_earnings']:.2f}",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+        )
+    
+    elif query.data == 'back_to_main':
+        keyboard = [
+            [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')],
+            [InlineKeyboardButton("📊 My Wallet", callback_data='wallet')],
+            [InlineKeyboardButton("👥 Refer Friends", callback_data='referral')]
+        ]
+        await query.edit_message_text(
+            "🎉 Welcome to Earn Bot!\n"
+            "Solve links and earn ₹0.15 per link!\n"
+            "Minimum withdrawal: ₹70",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
