@@ -15,7 +15,8 @@ from telegram.ext import (
 
 # Enable logging
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -110,9 +111,14 @@ def generate_link(update: Update, context: CallbackContext) -> None:
         )
         return
     
-    # In a real bot, you would call the shortlink API here
-    # For demo, we'll just show a mock link
-    shortlink = "https://smallshorts.example.com/abcd123"
+    # In production, replace this with your actual shortlink API call
+    SHORTS_API_KEY = os.getenv('SHORTS_API_KEY', 'your_api_key')
+    redirect_url = f"https://t.me/{context.bot.username}?start=verify_{user_id}"
+    shortlink = f"https://smallshorts.example.com/mock-link-for-{user_id}"
+    
+    # Actual API call would look like:
+    # response = requests.get(f"https://smallshorts.com/api?api={SHORTS_API_KEY}&url={redirect_url}")
+    # shortlink = response.json().get('shortenedUrl', 'Error generating link')
     
     query.edit_message_text(
         f"🔗 Solve this link to earn ₹{EARN_PER_LINK}:\n{shortlink}\n\n"
@@ -129,8 +135,17 @@ def verify_completion(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
     user = get_user(user_id)
     
-    # In a real bot, you would verify with the shortlink service API
-    # For demo, we'll assume the user completed it
+    # In production, verify with your shortlink service API here
+    is_verified = True  # Replace with actual verification
+    
+    if not is_verified:
+        query.edit_message_text(
+            "❌ Link not completed yet! Please solve the link first.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 Get Link Again", callback_data='generate_link')]
+            ])
+        )
+        return
     
     new_balance = user['balance'] + EARN_PER_LINK
     update_user(user_id, {
@@ -207,7 +222,7 @@ def process_upi(update: Update, context: CallbackContext) -> int:
         "withdrawn": user['withdrawn'] + amount
     })
     
-    # In a real bot, you would process the payment here
+    # In production, add your payment processing here
     update.message.reply_text(
         f"✅ Withdrawal request for ₹{amount:.2f} to {upi_id} submitted!\n"
         "Processing may take 24-48 hours.\n\n"
@@ -280,13 +295,14 @@ def main() -> None:
     PORT = int(os.environ.get('PORT', 8443))
     HEROKU_APP_NAME = os.environ.get('HEROKU_APP_NAME')
     
-    if HEROKU_APP_NAME:  # Running on Heroku
+    if HEROKU_APP_NAME:  # Running on production
         updater.start_webhook(
             listen="0.0.0.0",
             port=PORT,
             url_path=TOKEN,
             webhook_url=f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}"
         )
+        updater.bot.set_webhook(f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}")
     else:  # Running locally
         updater.start_polling()
 
