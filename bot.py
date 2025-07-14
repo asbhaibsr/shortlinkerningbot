@@ -14,6 +14,7 @@ from telegram.ext import (
     filters
 )
 import requests
+from telegram.error import TelegramError # Import TelegramError for robust error handling
 
 # Initialize Flask app for health check
 app = Flask(__name__)
@@ -492,9 +493,16 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             try:
                 await context.bot.send_message(chat_id=user_doc['user_id'], text=message_to_broadcast)
                 sent_count += 1
+            except TelegramError as e:
+                # Handle specific Telegram errors like user blocking the bot
+                if "blocked by the user" in str(e) or "user is deactivated" in str(e):
+                    logger.info(f"User {user_doc['user_id']} blocked the bot or is deactivated. Skipping.")
+                else:
+                    logger.warning(f"Failed to send broadcast to user {user_doc['user_id']}: {e}")
+                failed_count += 1
             except Exception as e:
                 failed_count += 1
-                logger.warning(f"Failed to send broadcast to user {user_doc['user_id']}: {e}")
+                logger.warning(f"An unexpected error occurred sending broadcast to user {user_doc['user_id']}: {e}")
         
         await update.message.reply_text(
             f"✅ Broadcast complete!\n"
@@ -542,14 +550,17 @@ async def handle_withdrawal_input(update: Update, context: ContextTypes.DEFAULT_
             )
 
             # Notify admin
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"🚨 New Withdrawal Request!\n"
-                     f"User ID: `{user_id}`\n"
-                     f"Amount: ₹{request_data['amount']:.2f}\n"
-                     f"UPI ID: `{upi_id}`",
-                parse_mode='Markdown'
-            )
+            try:
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=f"🚨 New Withdrawal Request!\n"
+                         f"User ID: `{user_id}`\n"
+                         f"Amount: ₹{request_data['amount']:.2f}\n"
+                         f"UPI ID: `{upi_id}`",
+                    parse_mode='Markdown'
+                )
+            except TelegramError as e:
+                logger.error(f"Failed to notify admin {ADMIN_ID} about withdrawal request: {e}")
 
         else:
             await update.message.reply_text(
@@ -563,21 +574,53 @@ async def handle_withdrawal_input(update: Update, context: ContextTypes.DEFAULT_
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Exception while handling update:", exc_info=context.error)
-    if update.callback_query:
-        await update.callback_query.message.reply_text('⚠️ An error occurred. Please try again.')
-    elif update.message:
-        await update.message.reply_text('⚠️ An error occurred. Please try again.')
+    
+    # Check if update is not None before accessing its attributes
+    if update:
+        # Check if update.callback_query is not None
+        if update.callback_query:
+            try:
+                await update.callback_query.message.reply_text('⚠️ An error occurred. Please try again.')
+            except Exception as e:
+                logger.error(f"Failed to send error message to callback_query user: {e}")
+        # Check if update.message is not None
+        elif update.message:
+            try:
+                await update.message.reply_text('⚠️ An error occurred. Please try again.')
+            except Exception as e:
+                logger.error(f"Failed to send error message to message user: {e}")
+        else:
+            # If neither callback_query nor message, log the update object
+            logger.warning(f"Error occurred with unhandled update type: {update}")
+    else:
+        logger.warning("Error handler called with None update object.")
+
 
 def run_bot():
     """Runs the Telegram bot using polling."""
     try:
         application = Application.builder().token(TOKEN).build()
 
+        # Delete any lingering webhooks to prevent conflicts, especially in polling mode
+        # This is a crucial step for deployment environments that might retain old webhook settings.
+        try:
+            logger.info("Deleting any existing webhooks...")
+            webhook_deleted = application.bot.delete_webhook()
+            if webhook_deleted:
+                logger.info("Existing webhook successfully deleted.")
+            else:
+                logger.warning("No webhook to delete or deletion failed silently.")
+        except TelegramError as e:
+            logger.warning(f"Could not delete webhook (may not exist or permission issue): {e}")
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during webhook deletion: {e}")
+
+
         # Add handlers
         application.add_handler(CommandHandler('start', start))
         application.add_handler(CommandHandler('admin', admin_command, filters=filters.User(ADMIN_ID)))
-        application.add_handler(CommandHandler('broadcast', broadcast_command, filters=filters.User(ADMIN_ID))) # New: Broadcast command
-        application.add_handler(CommandHandler('stats', stats_command, filters=filters.User(ADMIN_ID))) # New: Stats command
+        application.add_handler(CommandHandler('broadcast', broadcast_command, filters=filters.User(ADMIN_ID)))
+        application.add_handler(CommandHandler('stats', stats_command, filters=filters.User(ADMIN_ID)))
         application.add_handler(CallbackQueryHandler(button_handler))
         
         # Handler for admin text inputs based on state
