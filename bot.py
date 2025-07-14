@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask, request, abort
 from threading import Thread
-import asyncio
+import asyncio  # asyncio is still needed for run_polling and other async ops
 from pymongo import MongoClient
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -19,7 +19,7 @@ import requests
 from telegram.error import TelegramError
 from bson.objectid import ObjectId
 
-# Initialize Flask app for health check and webhook
+# Initialize Flask app for health check
 app = Flask(__name__)
 
 # Enable logging
@@ -42,7 +42,7 @@ user_states = db.user_states
 withdrawal_requests = db.withdrawal_requests
 
 # --- Admin ID ---
-ADMIN_ID = 7315805581 # Replace with your actual Telegram User ID
+ADMIN_ID = 7315805581  # Replace with your actual Telegram User ID
 # --- Admin ID ---
 
 # Bot constants
@@ -52,23 +52,12 @@ REFERRAL_BONUS = 0.50
 LINK_COOLDOWN = 1  # minutes
 
 # Shortlink API configuration
-API_TOKEN = '4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0' # Replace with your SmallShorts API Token
+API_TOKEN = '4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0'  # Replace with your SmallShorts API Token
 SHORTS_API_BASE_URL = "https://dashboard.smallshorts.com/api"
 
-# Webhook configuration for Koyeb
-WEBHOOK_PATH = f"/telegram-webhook/{TOKEN}" # Unique path for your bot
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-
-if not WEBHOOK_URL:
-    logger.warning("WEBHOOK_URL environment variable not set. Attempting to construct from K_SERVICE_URL or HOSTNAME.")
-    HOSTNAME = os.getenv('K_SERVICE_URL') or os.getenv('HOSTNAME')
-    if HOSTNAME:
-        WEBHOOK_URL = f"{HOSTNAME}{WEBHOOK_PATH}"
-        logger.info(f"Constructed WEBHOOK_URL: {WEBHOOK_URL}")
-    else:
-        logger.error("Neither WEBHOOK_URL nor HOSTNAME/K_SERVICE_URL found. Webhook will not be properly configured.")
-        # For local development without ngrok or similar, you might remove the raise and use polling
-        # or manually set webhook via API calls.
+# Webhook configuration (REMOVE THESE FOR POLLING)
+# WEBHOOK_PATH = f"/telegram-webhook/{TOKEN}"
+# WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
 # Database setup functions
 def init_user_state_db():
@@ -176,7 +165,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif referrer and referrer['user_id'] == user_id:
                 await update.message.reply_text("You cannot refer yourself.")
             elif user['referred_by'] is not None:
-                 await update.message.reply_text("You have already been referred.")
+                await update.message.reply_text("You have already been referred.")
             else:
                 await update.message.reply_text("Invalid referrer.")
 
@@ -229,7 +218,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Ensure state is cleared for non-admin interactions unless specifically handled
     if user_id != ADMIN_ID:
-        clear_user_state(user_id) # This might clear state prematurely if user clicks a button during a stateful process
+        clear_user_state(user_id)  # This might clear state prematurely if user clicks a button during a stateful process
 
     if query.data == 'generate_link':
         if user['last_click'] and (datetime.utcnow() - user['last_click']) < timedelta(minutes=LINK_COOLDOWN):
@@ -316,7 +305,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
             )
-    
+
     # New withdrawal method callbacks
     elif query.data == 'withdraw_upi':
         set_user_state(user_id, 'WITHDRAW_ENTER_UPI')
@@ -417,7 +406,7 @@ async def admin_show_withdrawals(update: Update, context: ContextTypes.DEFAULT_T
     for req in pending_requests:
         user_obj = get_user(req['user_id'])
         username = user_obj.get('username', f"User_{req['user_id']}")
-        
+
         details_str = ""
         if req['withdrawal_details']['method'] == "UPI ID":
             details_str = f"UPI ID: `{req['withdrawal_details']['id']}`"
@@ -446,14 +435,14 @@ async def admin_show_withdrawals(update: Update, context: ContextTypes.DEFAULT_T
         )
 
         keyboard = [[InlineKeyboardButton("✅ Mark as Paid", callback_data=f"approve_payment_{req['_id']}")]]
-        
+
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=message_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
-    
+
     await update.callback_query.edit_message_text(
         "👆 Above are all pending withdrawal requests. Click 'Mark as Paid' to process them.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
@@ -476,20 +465,18 @@ async def admin_approve_payment(update: Update, context: ContextTypes.DEFAULT_TY
             withdrawal_method = request['withdrawal_details']['method']
 
             # --- RESET USER'S EARNING DATA AFTER SUCCESSFUL PAYMENT ---
-            # Set desired fields back to their initial state (except user_id, total_earned, and withdrawn)
             users.update_one(
                 {"user_id": user_id},
                 {"$set": {
-                    "balance": 0.0,           # Reset balance to 0
-                    "referrals": 0,           # Reset current referral count for new earnings
-                    "referral_earnings": 0.0, # Reset current referral earnings
-                    "last_click": None,       # Reset last click for new earning sessions
-                    "referred_by": None       # Optional: Keep this if you want them to be able to refer again, or be referred again.
-                                              # If you want them to remain permanently linked to their original referrer, remove this line.
+                    "balance": 0.0,
+                    "referrals": 0,
+                    "referral_earnings": 0.0,
+                    "last_click": None,
+                    "referred_by": None
                 },
-                 "$inc": {
-                     "withdrawn": amount # Increment total withdrawn amount
-                 }
+                    "$inc": {
+                        "withdrawn": amount
+                    }
                 }
             )
             logger.info(f"User {user_id}'s earning data reset after successful withdrawal.")
@@ -548,9 +535,9 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id != ADMIN_ID:
         await update.message.reply_text("🚫 You are not authorized to use this command.")
         return
-    
+
     total_users = users.count_documents({})
-    
+
     await update.message.reply_text(
         f"📊 Bot Statistics:\n"
         f"Total Users: {total_users}\n"
@@ -650,7 +637,7 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             clear_user_state(user_id)
             if 'target_user_id_for_add' in context.user_data:
                 del context.user_data['target_user_id_for_add']
-    
+
     elif current_state == 'BROADCAST_MESSAGE':
         message_to_broadcast = text_input
         sent_count = 0
@@ -670,7 +657,7 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except Exception as e:
                 failed_count += 1
                 logger.warning(f"An unexpected error occurred sending broadcast to user {user_doc['user_id']}: {e}")
-        
+
         await update.message.reply_text(
             f"✅ Broadcast complete!\n"
             f"Sent to: {sent_count} users.\n"
@@ -684,7 +671,7 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     current_state = get_user_state(user_id)
-    user = get_user(user_id) 
+    user = get_user(user_id)
 
     # If not in a withdrawal state, or if balance is insufficient, ignore/reset
     if not current_state or not current_state.startswith('WITHDRAW_') or user['balance'] < MIN_WITHDRAWAL:
@@ -693,7 +680,7 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
                 f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
             )
-        clear_user_state(user_id) 
+        clear_user_state(user_id)
         return
 
     # Proceed based on specific withdrawal state
@@ -704,14 +691,14 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
 
     elif current_state == 'WITHDRAW_ENTER_BANK':
         bank_details_raw = update.message.text.strip()
-        if len(bank_details_raw) < 50: # Simple check for minimum length
+        if len(bank_details_raw) < 50:  # Simple check for minimum length
             await update.message.reply_text(
                 "Please provide complete bank account details in the specified format.",
                 parse_mode='Markdown',
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
             )
             return
-        
+
         withdrawal_details = {"method": "Bank Account", "details": bank_details_raw}
         await process_withdrawal_request(update, context, user_id, user['balance'], withdrawal_details)
 
@@ -727,7 +714,7 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
             )
             return
-    
+
     else:
         logger.warning(f"User {user_id} sent message while in unexpected state: {current_state}")
         await update.message.reply_text(
@@ -747,7 +734,7 @@ async def process_withdrawal_request(update: Update, context: ContextTypes.DEFAU
         "timestamp": datetime.utcnow(),
         "status": "pending"
     }
-    inserted_result = withdrawal_requests.insert_one(request_data) 
+    inserted_result = withdrawal_requests.insert_one(request_data)
     request_obj_id = inserted_result.inserted_id
 
     # DO NOT increment 'withdrawn' here. 'withdrawn' is incremented in admin_approve_payment
@@ -757,7 +744,7 @@ async def process_withdrawal_request(update: Update, context: ContextTypes.DEFAU
         f"🎉 Withdrawal request submitted!\n"
         f"Amount: ₹{amount:.2f}\n"
         f"Method: {details['method']}\n"
-        f"Your request has been sent to admin and will be processed soon. Your balance will be updated after admin approval.", # Clarified message
+        f"Your request has been sent to admin and will be processed soon. Your balance will be updated after admin approval.",  # Clarified message
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
     )
@@ -776,7 +763,7 @@ async def process_withdrawal_request(update: Update, context: ContextTypes.DEFAU
         admin_message += f"Bank Details:\n```\n{details['details']}\n```"
     elif details['method'] == "QR Code":
         admin_message += f"QR Code File ID: `{details['file_id']}`\n(QR image sent separately below)"
-    
+
     admin_keyboard = [[InlineKeyboardButton("✅ Mark as Paid", callback_data=f"approve_payment_{request_obj_id}")]]
 
     try:
@@ -807,7 +794,7 @@ async def process_withdrawal_request(update: Update, context: ContextTypes.DEFAU
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Exception while handling update:", exc_info=context.error)
-    
+
     if update:
         if update.callback_query:
             try:
@@ -827,30 +814,31 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
     application_instance = context.job.data["application_instance"]
     logger.info("Attempting MongoDB data cleanup...")
-    
+
     # In a real scenario, you'd query MongoDB for storage stats.
     # For now, let's assume it's high for the purpose of running cleanup.
-    db_usage_percentage = 95 # Placeholder: Replace with actual DB usage check if possible
+    # You might replace this with actual MongoDB storage stats check if available
+    db_usage_percentage = 95  # Placeholder
 
-    if db_usage_percentage >= 90: # Only run cleanup if usage is high
+    if db_usage_percentage >= 90:  # Only run cleanup if usage is high
         logger.warning(f"MongoDB usage is at {db_usage_percentage:.2f}%. Initiating cleanup of old data.")
-        
+
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
 
         users_to_delete_cursor = users.find({
             "balance": 0.0,
-            "user_id": {"$ne": ADMIN_ID}, 
-            "$or": [ 
-                {"created_at": {"$lt": thirty_days_ago}}, 
-                {"last_click": {"$lt": thirty_days_ago}}  
+            "user_id": {"$ne": ADMIN_ID},
+            "$or": [
+                {"created_at": {"$lt": thirty_days_ago}},
+                {"last_click": {"$lt": thirty_days_ago}}
             ]
         }).sort("created_at", 1)
 
         users_to_delete = list(users_to_delete_cursor)
-        
+
         if not users_to_delete:
-             logger.info("No suitable non-admin users with 0 balance and inactivity found for cleanup.")
-             return
+            logger.info("No suitable non-admin users with 0 balance and inactivity found for cleanup.")
+            return
 
         num_to_delete = max(1, int(len(users_to_delete) * 0.20))
         users_to_delete = users_to_delete[:num_to_delete]
@@ -869,9 +857,9 @@ async def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
                 deleted_user_ids.append(user_doc['user_id'])
             except Exception as e:
                 logger.error(f"Error deleting user {user_doc['user_id']} during cleanup: {e}")
-        
+
         logger.info(f"MongoDB cleanup complete. Deleted {deleted_count} users. User IDs: {deleted_user_ids}")
-        
+
         admin_msg = f"🧹 **MongoDB Cleanup Alert!** 🧹\n" \
                     f"Database usage was high ({db_usage_percentage:.2f}%).\n" \
                     f"{deleted_count} oldest *inactive users with 0 balance* have been deleted to free up space.\n" \
@@ -897,115 +885,57 @@ application.add_handler(CommandHandler('stats', stats_command, filters=filters.U
 application.add_handler(CallbackQueryHandler(button_handler))
 
 # Admin input handling (text messages when in specific admin states)
-# Order is important: Specific state handlers should come before general ones if they overlap.
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_admin_input))
 
 # User withdrawal input handling (text/photo messages when in specific withdrawal states)
-# This MUST be placed AFTER admin handlers if there's any chance of a text message overlapping
-# (e.g., if admin also sends text in a state)
-# But for now, general user text will be handled here if they are in a withdrawal state.
 application.add_handler(MessageHandler(
     (filters.TEXT | filters.PHOTO) & ~filters.COMMAND & ~filters.User(ADMIN_ID),
     handle_withdrawal_input_wrapper
 ))
-
-# General text messages from non-admin users (if any, consider adding a fallback)
-# If a message falls through all specific handlers, this would catch it.
-# For this bot, it's not strictly necessary as handle_withdrawal_input_wrapper already has a fallback,
-# but it's good practice for general purpose bots.
-# application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.User(ADMIN_ID), fallback_message_handler))
-
 
 application.add_error_handler(error_handler)
 
 # Setup job queue for cleanup
 job_queue = application.job_queue
 if job_queue is not None:
-    job_queue.run_repeating(cleanup_old_data, interval=timedelta(minutes=1), first=0, data={"application_instance": application})
+    job_queue.run_repeating(cleanup_old_data, interval=timedelta(days=1), first=0,
+                            data={"application_instance": application})  # Changed to daily for less frequent polling
 else:
     logger.error("JobQueue is not initialized. Ensure python-telegram-bot[job-queue] is installed.")
 
 
-# Flask routes for webhook and health check
+# Flask routes for health check ONLY
 @app.route('/')
 def health_check():
     return "EarnBot is running!"
 
-@app.route(WEBHOOK_PATH, methods=['POST'])
-async def telegram_webhook():
-    """Handle incoming Telegram updates."""
-    if request.method == "POST":
-        try:
-            # Get the update from the request body
-            update = Update.de_json(request.get_json(force=True), application.bot)
-            # Process the update with the bot application
-            await application.process_update(update)
-            return "ok"
-        except Exception as e:
-            logger.error(f"Error processing webhook update: {e}", exc_info=True)
-            # Return 200 OK even on error to prevent Telegram from retrying endlessly
-            return "ok" 
-    else:
-        abort(405) # Method Not Allowed
-
-async def set_webhook_on_startup():
-    """Sets the Telegram webhook."""
-    if WEBHOOK_URL:
-        try:
-            logger.info(f"Attempting to set webhook to: {WEBHOOK_URL}")
-            # Ensure any previous webhook is deleted
-            current_webhook_info = await application.bot.get_webhook_info()
-            if current_webhook_info.url != WEBHOOK_URL:
-                await application.bot.delete_webhook() 
-                await application.bot.set_webhook(url=WEBHOOK_URL)
-                logger.info("Webhook successfully set!")
-            else:
-                logger.info("Webhook already correctly set.")
-        except TelegramError as e:
-            logger.error(f"Failed to set webhook: {e}")
-            # In production, you might want to raise this to fail deployment if webhook fails
-            # raise
-    else:
-        logger.warning("WEBHOOK_URL is not set. Webhook will not be configured automatically.")
-
+# NO WEBHOOK ROUTE HERE
 
 def run_flask_server():
-    """Runs the Flask health check and webhook server."""
+    """Runs the Flask health check server."""
     PORT = int(os.environ.get('PORT', 8000))
     logger.info(f"Starting Flask server on port {PORT}")
+    # Using a simple development server for health check.
+    # For production, consider using Gunicorn or similar.
     app.run(host='0.0.0.0', port=PORT, debug=False)
 
 if __name__ == '__main__':
-    # It's crucial to set the webhook within an async context
-    # and ensure the Flask server runs in a separate thread.
-    
-    # 1. Set up the webhook: This is an async operation.
-    # It should ideally run once at the very beginning of your application startup.
-    # We use asyncio.run() to run this async function.
-    asyncio.run(set_webhook_on_startup()) 
-
-    # 2. Start the Flask server in a separate thread.
-    # The Flask server will listen for incoming Telegram updates at WEBHOOK_PATH
-    # and pass them to `application.process_update`.
+    # 1. Start the Flask server in a separate thread.
+    # This thread will handle health check requests.
     flask_server_thread = Thread(target=run_flask_server)
-    flask_server_thread.daemon = True # Allows thread to exit when main program exits
+    flask_server_thread.daemon = True  # Allows thread to exit when main program exits
     flask_server_thread.start()
 
-    logger.info("Bot application context is running. Flask server is listening for webhooks.")
-    
-    # Keep the main thread alive for the JobQueue to run.
-    # JobQueue runs in the application's event loop.
-    # Since Flask is in a separate thread and not blocking the main thread's asyncio loop,
-    # we need to keep the main event loop running.
+    logger.info("Starting Telegram bot in polling mode.")
+    # 2. Start the Telegram bot in polling mode in the main thread.
+    # This will block the main thread, but Flask is running in a separate thread.
     try:
-        asyncio.get_event_loop().run_forever()
-    except RuntimeError:
-        # This can happen if an event loop is already running (e.g., in some environments)
-        # In such cases, the `JobQueue` should still be active through `application`.
-        logger.info("An asyncio event loop is already running. Proceeding without `run_forever()` in main.")
+        application.run_polling(poll_interval=1, timeout=30)  # Poll every 1 second, with a 30 second timeout
     except KeyboardInterrupt:
         logger.info("Bot process interrupted. Shutting down.")
-        # Perform cleanup if necessary
-        application.stop() # Stop the PTB application
-        client.close() # Close MongoDB connection
-
+        application.stop()  # Stop the PTB application
+        client.close()  # Close MongoDB connection
+    except Exception as e:
+        logger.critical(f"An unhandled error occurred in the polling loop: {e}", exc_info=True)
+        application.stop()
+        client.close()
