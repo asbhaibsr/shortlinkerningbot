@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask, request, abort
 from threading import Thread
-import asyncio  # asyncio is still needed for run_polling and other async ops
+import asyncio
 from pymongo import MongoClient
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -45,19 +45,15 @@ withdrawal_requests = db.withdrawal_requests
 ADMIN_ID = 7315805581  # Replace with your actual Telegram User ID
 # --- Admin ID ---
 
-# Bot constants
-MIN_WITHDRAWAL = 70
+# Bot constants - UPDATED VALUES
+MIN_WITHDRAWAL = 10  # Changed from 70 to 10
 EARN_PER_LINK = 0.15
-REFERRAL_BONUS = 0.50
+REFERRAL_BONUS = 0.50  # Changed from 0.05 to 0.50
 LINK_COOLDOWN = 1  # minutes
 
 # Shortlink API configuration
 API_TOKEN = '4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0'  # Replace with your SmallShorts API Token
 SHORTS_API_BASE_URL = "https://dashboard.smallshorts.com/api"
-
-# Webhook configuration (REMOVE THESE FOR POLLING)
-# WEBHOOK_PATH = f"/telegram-webhook/{TOKEN}"
-# WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
 # Database setup functions
 def init_user_state_db():
@@ -203,8 +199,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "🎉 Welcome to Earn Bot!\n"
-        "Solve links and earn ₹0.15 per link!\n"
-        "Minimum withdrawal: ₹70",
+        f"Solve links and earn ₹{EARN_PER_LINK:.2f} per link!\n"
+        f"Minimum withdrawal: ₹{MIN_WITHDRAWAL}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -217,10 +213,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_username = (await context.bot.get_me()).username
 
     # Ensure state is cleared for non-admin interactions unless specifically handled
-    if user_id != ADMIN_ID:
-        clear_user_state(user_id)  # This might clear state prematurely if user clicks a button during a stateful process
+    # This line might have been clearing state prematurely, moved state clearing logic to specific handlers
+    # if user_id != ADMIN_ID:
+    #     clear_user_state(user_id)
 
     if query.data == 'generate_link':
+        clear_user_state(user_id) # Clear state when starting new non-stateful flow
         if user['last_click'] and (datetime.utcnow() - user['last_click']) < timedelta(minutes=LINK_COOLDOWN):
             remaining = (user['last_click'] + timedelta(minutes=LINK_COOLDOWN)) - datetime.utcnow()
             remaining_seconds = int(remaining.total_seconds())
@@ -250,6 +248,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == 'wallet':
+        clear_user_state(user_id) # Clear state when starting new non-stateful flow
         await query.edit_message_text(
             f"💰 Your Wallet\n\n"
             f"🪙 Balance: ₹{user['balance']:.2f}\n"
@@ -264,6 +263,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == 'referral':
+        clear_user_state(user_id) # Clear state when starting new non-stateful flow
         await query.edit_message_text(
             f"👥 Referral Program\n\n"
             f"🔗 Your referral link:\n"
@@ -275,6 +275,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == 'back_to_main':
+        clear_user_state(user_id) # Always clear state when going back to main menu
         keyboard = [
             [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')],
             [InlineKeyboardButton("📊 My Wallet", callback_data='wallet')],
@@ -282,12 +283,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await query.edit_message_text(
             "🎉 Welcome to Earn Bot!\n"
-            "Solve links and earn ₹0.15 per link!\n"
-            "Minimum withdrawal: ₹70",
+            f"Solve links and earn ₹{EARN_PER_LINK:.2f} per link!\n"
+            f"Minimum withdrawal: ₹{MIN_WITHDRAWAL}",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
     elif query.data == 'withdraw':
+        clear_user_state(user_id) # Clear state before starting withdrawal process
         if user['balance'] >= MIN_WITHDRAWAL:
             # Offer withdrawal options
             keyboard = [
@@ -308,6 +310,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # New withdrawal method callbacks
     elif query.data == 'withdraw_upi':
+        if user['balance'] < MIN_WITHDRAWAL: # Re-check balance
+            await query.edit_message_text(
+                f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+            )
+            return
         set_user_state(user_id, 'WITHDRAW_ENTER_UPI')
         await query.edit_message_text(
             "Please send your **UPI ID** (e.g., `yourname@bank` or `phonenumber@upi`).",
@@ -315,6 +323,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
         )
     elif query.data == 'withdraw_bank':
+        if user['balance'] < MIN_WITHDRAWAL: # Re-check balance
+            await query.edit_message_text(
+                f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+            )
+            return
         set_user_state(user_id, 'WITHDRAW_ENTER_BANK')
         await query.edit_message_text(
             "Please send your **Bank Account Details** in the following format:\n\n"
@@ -335,6 +349,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
         )
     elif query.data == 'withdraw_qr':
+        if user['balance'] < MIN_WITHDRAWAL: # Re-check balance
+            await query.edit_message_text(
+                f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+            )
+            return
         set_user_state(user_id, 'WITHDRAW_UPLOAD_QR')
         await query.edit_message_text(
             "Please upload your **UPI QR Code screenshot**. Make sure the QR code is clear and visible.",
@@ -345,17 +365,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- Admin Callbacks ---
     elif query.data == 'admin_get_balance':
         if user_id == ADMIN_ID:
+            clear_user_state(user_id) # Clear admin state before setting new one
             set_user_state(user_id, 'GET_BALANCE_USER_ID')
             await query.edit_message_text("Please send the User ID of the user whose balance you want to check.")
     elif query.data == 'admin_add_balance':
         if user_id == ADMIN_ID:
+            clear_user_state(user_id) # Clear admin state before setting new one
             set_user_state(user_id, 'ADD_BALANCE_USER_ID')
             await query.edit_message_text("Please send the User ID of the user to whom you want to add balance.")
     elif query.data == 'admin_main_menu':
         if user_id == ADMIN_ID:
+            clear_user_state(user_id) # Clear admin state when going to main admin menu
             await admin_menu(update, context)
     elif query.data == 'admin_show_pending_withdrawals':
         if user_id == ADMIN_ID:
+            clear_user_state(user_id) # Clear admin state before showing withdrawals
             await admin_show_withdrawals(update, context)
     elif query.data.startswith('approve_payment_'):
         if user_id == ADMIN_ID:
@@ -403,6 +427,10 @@ async def admin_show_withdrawals(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
 
+    # To avoid "Message is not modified" error, send a new message for each request
+    # and then edit the original query message to indicate completion.
+    await update.callback_query.edit_message_text("Fetching pending withdrawal requests...") # Initial message update
+
     for req in pending_requests:
         user_obj = get_user(req['user_id'])
         username = user_obj.get('username', f"User_{req['user_id']}")
@@ -443,8 +471,9 @@ async def admin_show_withdrawals(update: Update, context: ContextTypes.DEFAULT_T
             parse_mode='Markdown'
         )
 
-    await update.callback_query.edit_message_text(
-        "👆 Above are all pending withdrawal requests. Click 'Mark as Paid' to process them.",
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text="👆 Above are all pending withdrawal requests. Click 'Mark as Paid' to process them.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
     )
 
@@ -465,21 +494,22 @@ async def admin_approve_payment(update: Update, context: ContextTypes.DEFAULT_TY
             withdrawal_method = request['withdrawal_details']['method']
 
             # --- RESET USER'S EARNING DATA AFTER SUCCESSFUL PAYMENT ---
+            # IMPORTANT: Set balance to 0, and increment 'withdrawn' by the amount
             users.update_one(
                 {"user_id": user_id},
                 {"$set": {
-                    "balance": 0.0,
-                    "referrals": 0,
-                    "referral_earnings": 0.0,
+                    "balance": 0.0, # Reset balance to 0 after withdrawal
+                    "referrals": 0, # Reset referrals count
+                    "referral_earnings": 0.0, # Reset referral earnings
                     "last_click": None,
-                    "referred_by": None
+                    "referred_by": None # Reset referred by, or keep if you prefer users always retain their referrer
                 },
                     "$inc": {
-                        "withdrawn": amount
+                        "withdrawn": amount # Increment total withdrawn amount
                     }
                 }
             )
-            logger.info(f"User {user_id}'s earning data reset after successful withdrawal.")
+            logger.info(f"User {user_id}'s earning data reset after successful withdrawal of {amount}.")
 
             # Notify the user
             try:
@@ -673,19 +703,29 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
     current_state = get_user_state(user_id)
     user = get_user(user_id)
 
-    # If not in a withdrawal state, or if balance is insufficient, ignore/reset
-    if not current_state or not current_state.startswith('WITHDRAW_') or user['balance'] < MIN_WITHDRAWAL:
-        if user['balance'] < MIN_WITHDRAWAL:
-            await update.message.reply_text(
-                f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
-            )
-        clear_user_state(user_id)
+    # If user is not in a withdrawal state, or if balance is insufficient for a *new* request,
+    # then treat this as a regular message or an invalid input for withdrawal.
+    # Only proceed with processing if they are in a withdrawal state AND meet min balance.
+    if not current_state or not current_state.startswith('WITHDRAW_'):
+        # If user sent a message when not in a state, just ignore or send a generic reply
+        # logger.warning(f"User {user_id} sent message '{update.message.text}' when not in a specific state.")
+        # await update.message.reply_text("Please use the menu buttons to interact with the bot.")
+        return # Do not process further if not in a withdrawal state
+
+    if user['balance'] < MIN_WITHDRAWAL:
+        await update.message.reply_text(
+            f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
+        )
+        clear_user_state(user_id) # Clear state if balance is insufficient
         return
 
     # Proceed based on specific withdrawal state
     if current_state == 'WITHDRAW_ENTER_UPI':
         upi_id = update.message.text.strip()
+        if not upi_id:
+            await update.message.reply_text("UPI ID cannot be empty. Please send your UPI ID.")
+            return
         withdrawal_details = {"method": "UPI ID", "id": upi_id}
         await process_withdrawal_request(update, context, user_id, user['balance'], withdrawal_details)
 
@@ -698,7 +738,6 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
             )
             return
-
         withdrawal_details = {"method": "Bank Account", "details": bank_details_raw}
         await process_withdrawal_request(update, context, user_id, user['balance'], withdrawal_details)
 
@@ -714,8 +753,9 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
             )
             return
-
     else:
+        # This else block should theoretically not be hit if checks above are correct,
+        # but it's good for debugging unexpected states.
         logger.warning(f"User {user_id} sent message while in unexpected state: {current_state}")
         await update.message.reply_text(
             "It looks like you're in an unexpected state. Please try again from the main menu or click 'Cancel'.",
@@ -737,14 +777,11 @@ async def process_withdrawal_request(update: Update, context: ContextTypes.DEFAU
     inserted_result = withdrawal_requests.insert_one(request_data)
     request_obj_id = inserted_result.inserted_id
 
-    # DO NOT increment 'withdrawn' here. 'withdrawn' is incremented in admin_approve_payment
-    # when the balance is reset. This prevents double counting.
-
     await update.message.reply_text(
         f"🎉 Withdrawal request submitted!\n"
         f"Amount: ₹{amount:.2f}\n"
         f"Method: {details['method']}\n"
-        f"Your request has been sent to admin and will be processed soon. Your balance will be updated after admin approval.",  # Clarified message
+        f"Your request has been sent to admin and will be processed soon. Your balance will be updated after admin approval.",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
     )
@@ -762,7 +799,7 @@ async def process_withdrawal_request(update: Update, context: ContextTypes.DEFAU
     elif details['method'] == "Bank Account":
         admin_message += f"Bank Details:\n```\n{details['details']}\n```"
     elif details['method'] == "QR Code":
-        admin_message += f"QR Code File ID: `{details['file_id']}`\n(QR image sent separately below)"
+        admin_message += f"QR Code File ID: `{details['file_id']}`\n(QR image will be forwarded below)"
 
     admin_keyboard = [[InlineKeyboardButton("✅ Mark as Paid", callback_data=f"approve_payment_{request_obj_id}")]]
 
@@ -774,6 +811,7 @@ async def process_withdrawal_request(update: Update, context: ContextTypes.DEFAU
             reply_markup=InlineKeyboardMarkup(admin_keyboard)
         )
         if details['method'] == "QR Code" and update.message.photo:
+            # Forward the original photo message to admin
             await context.bot.forward_message(
                 chat_id=ADMIN_ID,
                 from_chat_id=update.message.chat_id,
@@ -815,24 +853,32 @@ async def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
     application_instance = context.job.data["application_instance"]
     logger.info("Attempting MongoDB data cleanup...")
 
-    # In a real scenario, you'd query MongoDB for storage stats.
-    # For now, let's assume it's high for the purpose of running cleanup.
-    # You might replace this with actual MongoDB storage stats check if available
-    db_usage_percentage = 95  # Placeholder
+    # For demonstration, assume 95% usage for cleanup to run
+    # In a real scenario, you'd check actual MongoDB storage statistics.
+    # Example (requires admin privileges to DB for 'dbStats'):
+    # try:
+    #     stats = db.command("dbStats")
+    #     db_size_mb = stats.get('dataSize', 0) / (1024 * 1024)
+    #     storage_size_mb = stats.get('storageSize', 0) / (1024 * 1024)
+    #     db_usage_percentage = (db_size_mb / storage_size_mb) * 100 if storage_size_mb else 0
+    # except Exception as e:
+    #     logger.warning(f"Could not get MongoDB stats: {e}. Assuming high usage for cleanup.")
+    db_usage_percentage = 95 # Placeholder for now
 
-    if db_usage_percentage >= 90:  # Only run cleanup if usage is high
+    if db_usage_percentage >= 90:
         logger.warning(f"MongoDB usage is at {db_usage_percentage:.2f}%. Initiating cleanup of old data.")
 
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
 
+        # Find users with 0 balance, not admin, and inactive for 30 days
         users_to_delete_cursor = users.find({
             "balance": 0.0,
-            "user_id": {"$ne": ADMIN_ID},
+            "user_id": {"$ne": ADMIN_ID}, # Exclude admin
             "$or": [
-                {"created_at": {"$lt": thirty_days_ago}},
-                {"last_click": {"$lt": thirty_days_ago}}
+                {"created_at": {"$lt": thirty_days_ago}}, # Created before 30 days and inactive
+                {"last_click": {"$lt": thirty_days_ago}} # Last click before 30 days
             ]
-        }).sort("created_at", 1)
+        }).sort("created_at", 1) # Sort by creation date to delete oldest first
 
         users_to_delete = list(users_to_delete_cursor)
 
@@ -840,6 +886,7 @@ async def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
             logger.info("No suitable non-admin users with 0 balance and inactivity found for cleanup.")
             return
 
+        # Delete up to 20% of inactive users to free up space
         num_to_delete = max(1, int(len(users_to_delete) * 0.20))
         users_to_delete = users_to_delete[:num_to_delete]
 
@@ -852,7 +899,9 @@ async def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
 
             try:
                 users.delete_one({"_id": user_doc['_id']})
-                user_states.delete_one({"user_id": user_doc['user_id']})
+                user_states.delete_one({"user_id": user_doc['user_id']}) # Also clear their state if any
+                # Optionally delete their withdrawal requests if any, depending on your policy
+                # withdrawal_requests.delete_many({"user_id": user_doc['user_id']})
                 deleted_count += 1
                 deleted_user_ids.append(user_doc['user_id'])
             except Exception as e:
@@ -888,6 +937,8 @@ application.add_handler(CallbackQueryHandler(button_handler))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_admin_input))
 
 # User withdrawal input handling (text/photo messages when in specific withdrawal states)
+# This handler should only activate for users NOT ADMIN and when they are in a withdrawal state.
+# The filters are crucial here.
 application.add_handler(MessageHandler(
     (filters.TEXT | filters.PHOTO) & ~filters.COMMAND & ~filters.User(ADMIN_ID),
     handle_withdrawal_input_wrapper
@@ -898,8 +949,8 @@ application.add_error_handler(error_handler)
 # Setup job queue for cleanup
 job_queue = application.job_queue
 if job_queue is not None:
-    job_queue.run_repeating(cleanup_old_data, interval=timedelta(days=1), first=0,
-                            data={"application_instance": application})  # Changed to daily for less frequent polling
+    job_queue.run_repeating(cleanup_old_data, interval=timedelta(days=1), first=datetime.now() + timedelta(minutes=5), # Run 5 minutes after start
+                            data={"application_instance": application})
 else:
     logger.error("JobQueue is not initialized. Ensure python-telegram-bot[job-queue] is installed.")
 
@@ -909,33 +960,26 @@ else:
 def health_check():
     return "EarnBot is running!"
 
-# NO WEBHOOK ROUTE HERE
-
 def run_flask_server():
     """Runs the Flask health check server."""
     PORT = int(os.environ.get('PORT', 8000))
     logger.info(f"Starting Flask server on port {PORT}")
-    # Using a simple development server for health check.
-    # For production, consider using Gunicorn or similar.
     app.run(host='0.0.0.0', port=PORT, debug=False)
 
 if __name__ == '__main__':
-    # 1. Start the Flask server in a separate thread.
-    # This thread will handle health check requests.
     flask_server_thread = Thread(target=run_flask_server)
-    flask_server_thread.daemon = True  # Allows thread to exit when main program exits
+    flask_server_thread.daemon = True
     flask_server_thread.start()
 
     logger.info("Starting Telegram bot in polling mode.")
-    # 2. Start the Telegram bot in polling mode in the main thread.
-    # This will block the main thread, but Flask is running in a separate thread.
     try:
-        application.run_polling(poll_interval=1, timeout=30)  # Poll every 1 second, with a 30 second timeout
+        application.run_polling(poll_interval=1, timeout=30)
     except KeyboardInterrupt:
         logger.info("Bot process interrupted. Shutting down.")
-        application.stop()  # Stop the PTB application
-        client.close()  # Close MongoDB connection
+        application.stop()
+        client.close()
     except Exception as e:
         logger.critical(f"An unhandled error occurred in the polling loop: {e}", exc_info=True)
         application.stop()
         client.close()
+
