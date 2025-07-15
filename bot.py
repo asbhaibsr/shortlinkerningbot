@@ -51,6 +51,7 @@ MIN_WITHDRAWAL = 10  # Changed from 70 to 10
 EARN_PER_LINK = 0.15
 REFERRAL_BONUS = 0.50  # Changed from 0.05 to 0.50
 LINK_COOLDOWN = 1  # minutes
+REQUIRED_LINKS_FOR_REFERRAL_BONUS = 5 # NEW: Number of links a referred user must complete
 
 # Shortlink API configuration
 API_TOKEN = '4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0'  # Replace with your SmallShorts API Token
@@ -90,7 +91,8 @@ def get_user(user_id):
             "withdrawn": 0.0,
             "last_click": None,
             "created_at": datetime.utcnow(),
-            "referred_by": None
+            "referred_by": None,
+            "links_completed": 0 # NEW: To track links completed for referral bonus
         }
         users.insert_one(user)
     return user
@@ -152,18 +154,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             referrer_id = int(arg.split('_')[1])
             referrer = get_user(referrer_id)
             if referrer and referrer['user_id'] != user_id and user['referred_by'] is None:
-                users.update_one(
-                    {"user_id": referrer_id},
-                    {"$inc": {
-                        "referrals": 1,
-                        "referral_earnings": REFERRAL_BONUS,
-                        "balance": REFERRAL_BONUS,
-                        "total_earned": REFERRAL_BONUS
-                    }}
-                )
+                # Store referrer ID, but don't give bonus yet
                 users.update_one({"user_id": user_id}, {"$set": {"referred_by": referrer_id}})
                 await update.message.reply_text(
-                    f"🎉 Welcome! You were referred by {referrer_id}! A bonus of ₹{REFERRAL_BONUS:.2f} has been added to their account."
+                    f"🎉 Welcome! You were referred by {referrer_id}! "
+                    f"The referrer will receive a bonus once you complete {REQUIRED_LINKS_FOR_REFERRAL_BONUS} links."
                 )
             elif referrer and referrer['user_id'] == user_id:
                 await update.message.reply_text("You cannot refer yourself.")
@@ -183,14 +178,56 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 else:
                     new_balance = user['balance'] + EARN_PER_LINK
+                    
+                    # Update links_completed for the user
                     users.update_one(
                         {"user_id": user_id},
                         {"$set": {
                             "balance": new_balance,
                             "total_earned": user['total_earned'] + EARN_PER_LINK,
                             "last_click": datetime.utcnow()
-                        }}
+                        },
+                         "$inc": {"links_completed": 1} # Increment links completed
+                        }
                     )
+                    
+                    # Re-fetch user after update to get the latest links_completed count
+                    updated_user = get_user(user_id)
+                    
+                    # Check for referral bonus
+                    if updated_user['referred_by'] is not None and updated_user['links_completed'] == REQUIRED_LINKS_FOR_REFERRAL_BONUS:
+                        referrer_id = updated_user['referred_by']
+                        referrer = get_user(referrer_id)
+                        if referrer:
+                            users.update_one(
+                                {"user_id": referrer_id},
+                                {"$inc": {
+                                    "referrals": 1, # Increment referral count
+                                    "referral_earnings": REFERRAL_BONUS,
+                                    "balance": REFERRAL_BONUS,
+                                    "total_earned": REFERRAL_BONUS # Adding to total earned of referrer
+                                }}
+                            )
+                            # Remove referred_by after bonus is given to prevent double counting
+                            users.update_one({"user_id": user_id}, {"$unset": {"referred_by": ""}})
+                            
+                            await update.message.reply_text(
+                                f"🎉 Congratulations! You have completed {REQUIRED_LINKS_FOR_REFERRAL_BONUS} links. "
+                                f"A bonus of ₹{REFERRAL_BONUS:.2f} has been added to your referrer's account ({referrer_id})."
+                            )
+                            try:
+                                await context.bot.send_message(
+                                    chat_id=referrer_id,
+                                    text=f"🎉 **Referral Bonus!** 🎉\n\n"
+                                         f"User [{updated_user.get('username', f'User_{user_id}')}](tg://user?id={user_id}) "
+                                         f"has completed {REQUIRED_LINKS_FOR_REFERRAL_BONUS} links. "
+                                         f"You earned ₹{REFERRAL_BONUS:.2f}!\n"
+                                         f"Your new balance: ₹{referrer['balance'] + REFERRAL_BONUS:.2f}",
+                                    parse_mode='Markdown'
+                                )
+                            except TelegramError as e:
+                                logger.warning(f"Failed to notify referrer {referrer_id} about bonus: {e}")
+
                     await update.message.reply_text(
                         f"✅ Link solved successfully!\n"
                         f"💰 You earned ₹{EARN_PER_LINK:.2f}. Your new balance: ₹{new_balance:.2f}"
@@ -268,13 +305,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == 'referral':
         clear_user_state(user_id)
-        await query.edit_message_text(
+        referral_message = (
             f"👥 Referral Program\n\n"
             f"🔗 Your referral link:\n"
             f"https://t.me/{bot_username}?start={user['referral_code']}\n\n"
-            f"💰 Earn ₹{REFERRAL_BONUS} for each friend who joins using your link!\n"
+            f"💰 Earn ₹{REFERRAL_BONUS} for each friend who joins using your link AND completes {REQUIRED_LINKS_FOR_REFERRAL_BONUS} links!\n"
             f"👥 Total referrals: {user['referrals']}\n"
-            f"💸 Earned from referrals: ₹{user['referral_earnings']:.2f}",
+            f"💸 Earned from referrals: ₹{user['referral_earnings']:.2f}"
+        )
+        await query.edit_message_text(
+            referral_message,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
         )
 
@@ -592,7 +632,8 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     f"Balance: ₹{target_user['balance']:.2f}\n"
                     f"Total Earned: ₹{target_user['total_earned']:.2f}\n"
                     f"Referrals: {target_user['referrals']}\n"
-                    f"Referred By: {target_user['referred_by'] if target_user.get('referred_by') else 'N/A'}",
+                    f"Referred By: {target_user['referred_by'] if target_user.get('referred_by') else 'N/A'}\n"
+                    f"Links Completed: {target_user.get('links_completed', 0)}", # Display links completed
                     parse_mode='Markdown',
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
                 )
@@ -740,7 +781,7 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
 
     elif current_state == 'WITHDRAW_ENTER_BANK':
         bank_details_raw = update.message.text.strip()
-        if len(bank_details_raw) < 50:
+        if len(bank_details_raw) < 50: # Simple validation, can be improved
             await update.message.reply_text(
                 "Please provide complete bank account details in the specified format.",
                 parse_mode='Markdown',
@@ -978,3 +1019,4 @@ if __name__ == '__main__':
         logger.critical(f"An unhandled error occurred in the polling loop: {e}", exc_info=True)
         application.stop()
         client.close()
+
