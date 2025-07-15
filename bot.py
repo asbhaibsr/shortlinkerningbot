@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date # Import date
 from flask import Flask, request, abort
 from threading import Thread
 import asyncio
@@ -19,6 +19,7 @@ import requests
 from telegram.error import TelegramError
 from bson.objectid import ObjectId
 import uuid # For generating unique IDs
+import random # For random selection of shortlink API
 
 # Initialize Flask app for health check
 app = Flask(__name__)
@@ -47,15 +48,25 @@ ADMIN_ID = 7315805581  # Replace with your actual Telegram User ID
 # --- Admin ID ---
 
 # Bot constants - UPDATED VALUES
-MIN_WITHDRAWAL = 10  # Changed from 70 to 10
-EARN_PER_LINK = 0.15
-REFERRAL_BONUS = 0.50  # Changed from 0.05 to 0.50
+MIN_WITHDRAWAL = 10
+# EARN_PER_LINK is now dynamic based on links_completed_today
+REFERRAL_BONUS = 0.50
 LINK_COOLDOWN = 1  # minutes
-REQUIRED_LINKS_FOR_REFERRAL_BONUS = 5 # NEW: Number of links a referred user must complete
+REQUIRED_LINKS_FOR_REFERRAL_BONUS = 5 # Number of links a referred user must complete
+DAILY_LINK_LIMIT = 30 # NEW: Maximum links a user can complete in a day
 
-# Shortlink API configuration
-API_TOKEN = '4ca8f20ebd8b02f6fe1f55eb1e49136f69e2f5a0'  # Replace with your SmallShorts API Token
-SHORTS_API_BASE_URL = "https://dashboard.smallshorts.com/api"
+# Shortlink API configurations
+SHORTLINK_APIS = [
+    {"name": "Arlinks", "base_url": "https://arlinks.in/api", "token": "5bcaa11eddf0429bf55ee2b84230fb3dc9cee28a"},
+    {"name": "Just2Earn", "base_url": "https://just2earn.com/api", "token": "3e26a55a7dd8ba61786bb707ac451f783c0f4ab8"},
+    {"name": "GPLinks", "base_url": "https://api.gplinks.com/api", "token": "7c9045b10559ffa7d8358a3e83984dc63a61c72e"},
+    {"name": "Seturl", "base_url": "https://seturl.in/api", "token": "c7f2f4eb705e0aa27a46fb3aa3fc3d41220c6cfb"},
+    {"name": "Short2Url", "base_url": "https://short2url.in/api", "token": "36a440ba814cf37f362ea8be07af667b5d53c2d7"},
+    {"name": "Adrinolinks", "base_url": "https://adrinolinks.in/api", "token": "4f374dca406de7d0fe955ee2c1f731b250175895"},
+    {"name": "Linkpays", "base_url": "https://linkpays.in/api", "token": "35aced15e021e8efcf1870f5208e4fba97a55d92"},
+    {"name": "ShrinkForEarn", "base_url": "https://shrinkforearn.in/api", "token": "42e84174eceb9661f177065846b130e37b6e368b"},
+    {"name": "Arolinks", "base_url": "https://arolinks.com/api", "token": "e59d9a7076acc80820345129b5634aec2f6c54c6"}
+]
 
 # Database setup functions
 def init_user_state_db():
@@ -92,9 +103,21 @@ def get_user(user_id):
             "last_click": None,
             "created_at": datetime.utcnow(),
             "referred_by": None,
-            "links_completed": 0 # NEW: To track links completed for referral bonus
+            "links_completed": 0, # Total links ever completed by this user
+            "links_completed_today": 0, # NEW: Links completed today for daily limit
+            "last_earning_day": datetime.utcnow().date() # NEW: Last day user earned, for daily reset
         }
         users.insert_one(user)
+    
+    # Ensure new fields are present for existing users
+    # This migration logic should ideally run once on startup or as a separate script
+    if "links_completed_today" not in user:
+        user["links_completed_today"] = 0
+        users.update_one({"user_id": user_id}, {"$set": {"links_completed_today": 0}})
+    if "last_earning_day" not in user:
+        user["last_earning_day"] = datetime.utcnow().date()
+        users.update_one({"user_id": user_id}, {"$set": {"last_earning_day": datetime.utcnow().date()}})
+
     return user
 
 def update_user(user_id, update_data):
@@ -111,28 +134,35 @@ def clear_user_state(user_id):
     user_states.delete_one({"user_id": user_id})
 
 def generate_short_link(long_url):
+    selected_api = random.choice(SHORTLINK_APIS)
+    api_name = selected_api["name"]
+    base_url = selected_api["base_url"]
+    api_token = selected_api["token"]
+
     try:
         params = {
-            'api': API_TOKEN,
+            'api': api_token,
             'url': long_url
         }
-        response = requests.get(SHORTS_API_BASE_URL, params=params)
+        response = requests.get(base_url, params=params)
         response.raise_for_status()
         result = response.json()
 
         if result.get('status') == 'error':
-            logger.error(f"SmallShorts API Error: {result.get('message')}")
+            logger.error(f"{api_name} API Error: {result.get('message')}")
             return None
         elif result.get('shortenedUrl'):
             return result['shortenedUrl']
+        elif result.get('short'):
+             return result['short']
         else:
-            logger.error(f"Unexpected SmallShorts API response: {result}")
+            logger.error(f"Unexpected {api_name} API response: {result}")
             return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error connecting to SmallShorts API: {e}")
+        logger.error(f"Error connecting to {api_name} API: {e}")
         return None
     except ValueError as e:
-        logger.error(f"Error parsing SmallShorts API response (not JSON): {e}")
+        logger.error(f"Error parsing {api_name} API response (not JSON): {e}")
         return None
 
 # Bot handlers
@@ -147,6 +177,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_user(user_id, {"username": username})
 
     clear_user_state(user_id)
+
+    # --- Daily Link Count Reset Logic ---
+    current_date = datetime.utcnow().date()
+    if user['last_earning_day'] != current_date:
+        users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "links_completed_today": 0,
+                "last_earning_day": current_date
+            }}
+        )
+        user['links_completed_today'] = 0 # Update in current user object as well for immediate use
+        user['last_earning_day'] = current_date
+    # --- End Daily Link Count Reset Logic ---
 
     if context.args:
         arg = context.args[0]
@@ -176,64 +220,106 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text(
                         f"⏳ You've recently completed a link. Please wait {remaining_seconds} seconds before earning again."
                     )
-                else:
-                    new_balance = user['balance'] + EARN_PER_LINK
-                    
-                    # Update links_completed for the user
-                    users.update_one(
-                        {"user_id": user_id},
-                        {"$set": {
-                            "balance": new_balance,
-                            "total_earned": user['total_earned'] + EARN_PER_LINK,
-                            "last_click": datetime.utcnow()
-                        },
-                         "$inc": {"links_completed": 1} # Increment links completed
-                        }
-                    )
-                    
-                    # Re-fetch user after update to get the latest links_completed count
-                    updated_user = get_user(user_id)
-                    
-                    # Check for referral bonus
-                    if updated_user['referred_by'] is not None and updated_user['links_completed'] == REQUIRED_LINKS_FOR_REFERRAL_BONUS:
-                        referrer_id = updated_user['referred_by']
-                        referrer = get_user(referrer_id)
-                        if referrer:
-                            users.update_one(
-                                {"user_id": referrer_id},
-                                {"$inc": {
-                                    "referrals": 1, # Increment referral count
-                                    "referral_earnings": REFERRAL_BONUS,
-                                    "balance": REFERRAL_BONUS,
-                                    "total_earned": REFERRAL_BONUS # Adding to total earned of referrer
-                                }}
-                            )
-                            # Remove referred_by after bonus is given to prevent double counting
-                            users.update_one({"user_id": user_id}, {"$unset": {"referred_by": ""}})
-                            
-                            await update.message.reply_text(
-                                f"🎉 Congratulations! You have completed {REQUIRED_LINKS_FOR_REFERRAL_BONUS} links. "
-                                f"A bonus of ₹{REFERRAL_BONUS:.2f} has been added to your referrer's account ({referrer_id})."
-                            )
-                            try:
-                                await context.bot.send_message(
-                                    chat_id=referrer_id,
-                                    text=f"🎉 **Referral Bonus!** 🎉\n\n"
-                                         f"User [{updated_user.get('username', f'User_{user_id}')}](tg://user?id={user_id}) "
-                                         f"has completed {REQUIRED_LINKS_FOR_REFERRAL_BONUS} links. "
-                                         f"You earned ₹{REFERRAL_BONUS:.2f}!\n"
-                                         f"Your new balance: ₹{referrer['balance'] + REFERRAL_BONUS:.2f}",
-                                    parse_mode='Markdown'
-                                )
-                            except TelegramError as e:
-                                logger.warning(f"Failed to notify referrer {referrer_id} about bonus: {e}")
-
+                    # Re-send main menu buttons
+                    keyboard = [
+                        [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')],
+                        [InlineKeyboardButton("📊 My Wallet", callback_data='wallet')],
+                        [InlineKeyboardButton("👥 Refer Friends", callback_data='referral')]
+                    ]
                     await update.message.reply_text(
-                        f"✅ Link solved successfully!\n"
-                        f"💰 You earned ₹{EARN_PER_LINK:.2f}. Your new balance: ₹{new_balance:.2f}"
+                        "Please choose an option:",
+                        reply_markup=InlineKeyboardMarkup(keyboard)
                     )
+                    return
+
+                # --- Tiered Earning Logic ---
+                earning_rate = 0.0
+                notification_message = ""
+                
+                # Re-fetch user to ensure latest links_completed_today count
+                updated_user_for_earning = get_user(user_id) 
+
+                if updated_user_for_earning['links_completed_today'] < 10:
+                    earning_rate = 0.15
+                    if updated_user_for_earning['links_completed_today'] == 9: # After completing 10th link, for 11th
+                        notification_message = "\n---\n**सूचना:** आपने आज अपनी पहली 10 लिंक पूरी कर ली हैं। अब से, आपको प्रति लिंक ₹0.10 मिलेंगे।"
+                elif updated_user_for_earning['links_completed_today'] < 20:
+                    earning_rate = 0.10
+                    if updated_user_for_earning['links_completed_today'] == 19: # After completing 20th link, for 21st
+                        notification_message = "\n---\n**सूचना:** आपने आज अपनी 20 लिंक पूरी कर ली हैं। अब से, आपको प्रति लिंक ₹0.05 मिलेंगे। यह आपकी दैनिक कमाई की अंतिम दर है।"
+                elif updated_user_for_earning['links_completed_today'] < DAILY_LINK_LIMIT: # Limit at 30
+                    earning_rate = 0.05
+                else:
+                    # Daily limit reached
+                    await update.message.reply_text(
+                        "आप आज के लिए इतनी ही लिंक जनरेट कर सकते हैं। कृपया अगले दिन प्रयास करें।\n"
+                        "--- \nअधिक पैसा कमाने के लिए अपने दोस्तों को रेफर करें!",
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🤝 दोस्तों को रेफर करें", callback_data='referral')]])
+                    )
+                    return # Exit without earning
+
+                # Update user's balance and link counts
+                new_balance = updated_user_for_earning['balance'] + earning_rate
+                
+                users.update_one(
+                    {"user_id": user_id},
+                    {"$set": {
+                        "balance": new_balance,
+                        "total_earned": updated_user_for_earning['total_earned'] + earning_rate,
+                        "last_click": datetime.utcnow(),
+                        "last_earning_day": current_date # Ensure this is updated
+                    },
+                     "$inc": {
+                         "links_completed": 1, # Total links ever completed
+                         "links_completed_today": 1 # Links completed today
+                     }
+                    }
+                )
+                
+                # Re-fetch user after update to get the very latest count for referral bonus check
+                updated_user_after_earning = get_user(user_id) 
+                
+                # Check for referral bonus
+                if updated_user_after_earning['referred_by'] is not None and updated_user_after_earning['links_completed_today'] == REQUIRED_LINKS_FOR_REFERRAL_BONUS:
+                    referrer_id = updated_user_after_earning['referred_by']
+                    referrer = get_user(referrer_id)
+                    if referrer:
+                        users.update_one(
+                            {"user_id": referrer_id},
+                            {"$inc": {
+                                "referrals": 1,
+                                "referral_earnings": REFERRAL_BONUS,
+                                "balance": REFERRAL_BONUS,
+                                "total_earned": REFERRAL_BONUS
+                            }}
+                        )
+                        # Remove referred_by after bonus is given to prevent double counting
+                        users.update_one({"user_id": user_id}, {"$unset": {"referred_by": ""}})
+                        
+                        await update.message.reply_text(
+                            f"🎉 Congratulations! आपने आज {REQUIRED_LINKS_FOR_REFERRAL_BONUS} लिंक पूरी कर ली हैं। "
+                            f"आपके रेफ़रर ({referrer_id}) के खाते में ₹{REFERRAL_BONUS:.2f} का बोनस जोड़ दिया गया है।"
+                        )
+                        try:
+                            await context.bot.send_message(
+                                chat_id=referrer_id,
+                                text=f"🎉 **Referral Bonus!** 🎉\n\n"
+                                     f"User [{updated_user_after_earning.get('username', f'User_{user_id}')}](tg://user?id={user_id}) "
+                                     f"has completed {REQUIRED_LINKS_FOR_REFERRAL_BONUS} links. "
+                                     f"You earned ₹{REFERRAL_BONUS:.2f}!\n"
+                                     f"Your new balance: ₹{referrer['balance'] + REFERRAL_BONUS:.2f}",
+                                parse_mode='Markdown'
+                            )
+                        except TelegramError as e:
+                            logger.warning(f"Failed to notify referrer {referrer_id} about bonus: {e}")
+
+                await update.message.reply_text(
+                    f"✅ Link solved successfully!\n"
+                    f"💰 आपने ₹{earning_rate:.2f} कमाए हैं। आपका नया बैलेंस: ₹{new_balance:.2f}"
+                    f"{notification_message}"
+                )
             else:
-                await update.message.reply_text("This link was not generated for you.")
+                await update.message.reply_text("यह लिंक आपके लिए जनरेट नहीं की गई थी।")
 
     keyboard = [
         [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')],
@@ -242,9 +328,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     await update.message.reply_text(
-        "🎉 Welcome to Earn Bot!\n"
-        f"Solve links and earn ₹{EARN_PER_LINK:.2f} per link!\n"
-        f"Minimum withdrawal: ₹{MIN_WITHDRAWAL}",
+        "🎉 Earn Bot में आपका स्वागत है!\n"
+        f"लिंक सॉल्व करें और प्रति लिंक ₹0.15 तक कमाएं!\n" # Initial earning rate in message
+        f"न्यूनतम निकासी: ₹{MIN_WITHDRAWAL}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -256,12 +342,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(user_id)
     bot_username = (await context.bot.get_me()).username
 
+    # --- Daily Link Count Reset Logic for Callback Queries ---
+    current_date = datetime.utcnow().date()
+    if user['last_earning_day'] != current_date:
+        users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "links_completed_today": 0,
+                "last_earning_day": current_date
+            }}
+        )
+        user = get_user(user_id) # Re-fetch user object to get updated counts
+    # --- End Daily Link Count Reset Logic ---
+
     if query.data == 'generate_link':
         clear_user_state(user_id)
+
+        # Check daily limit BEFORE cooldown
+        if user['links_completed_today'] >= DAILY_LINK_LIMIT:
+            await query.edit_message_text(
+                "आप आज के लिए इतनी ही लिंक जनरेट कर सकते हैं। कृपया अगले दिन प्रयास करें।\n"
+                "--- \nअधिक पैसा कमाने के लिए अपने दोस्तों को रेफर करें!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🤝 दोस्तों को रेफर करें", callback_data='referral')],
+                                                   [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]]) # Added back button here
+            )
+            return
+
         if user['last_click'] and (datetime.utcnow() - user['last_click']) < timedelta(minutes=LINK_COOLDOWN):
             remaining = (user['last_click'] + timedelta(minutes=LINK_COOLDOWN)) - datetime.utcnow()
             remaining_seconds = int(remaining.total_seconds())
-            await query.edit_message_text(f"⏳ Please wait {remaining_seconds} seconds before generating another link.")
+            await query.edit_message_text(f"⏳ कृपया एक और लिंक जनरेट करने से पहले {remaining_seconds} सेकंड इंतजार करें।")
             return
 
         # Generate a unique long URL by adding a UUID
@@ -271,64 +381,64 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not short_link:
             await query.edit_message_text(
-                "❌ Link generate करने में समस्या हुई। कृपया बाद में पुनः प्रयास करें।"
+                "❌ लिंक जनरेट करने में समस्या हुई। कृपया बाद में पुनः प्रयास करें।"
             )
             return
 
         keyboard_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔗 Click to Solve Link", url=short_link)],
-            [InlineKeyboardButton("❓ How to Solve Link", url="https://t.me/Asbhai_bsr/289")],
-            [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]
+            [InlineKeyboardButton("🔗 लिंक हल करने के लिए क्लिक करें", url=short_link)],
+            [InlineKeyboardButton("🔙 वापस", callback_data='back_to_main')]
         ])
 
         await query.edit_message_text(
-            f"✅ Your link is ready! Please click the button below to solve it.\n\n"
-            f"Once you complete the steps on the website, you'll be redirected back to me, and your balance will be updated automatically.\n"
-            f"⏳ Next link available in {LINK_COOLDOWN} minute(s) after successful completion.",
+            f"✅ आपकी लिंक तैयार है! इसे हल करने के लिए नीचे दिए गए बटन पर क्लिक करें।\n\n"
+            f"एक बार जब आप वेबसाइट पर चरणों को पूरा कर लेंगे, तो आपको मेरे पास वापस भेज दिया जाएगा, और आपका बैलेंस स्वचालित रूप से अपडेट हो जाएगा।\n"
+            f"⏳ सफल समापन के बाद {LINK_COOLDOWN} मिनट के बाद अगली लिंक उपलब्ध होगी।",
             reply_markup=keyboard_markup
         )
 
     elif query.data == 'wallet':
         clear_user_state(user_id)
         await query.edit_message_text(
-            f"💰 Your Wallet\n\n"
-            f"🪙 Balance: ₹{user['balance']:.2f}\n"
-            f"📊 Total Earned: ₹{user['total_earned']:.2f}\n"
-            f"💸 Withdrawn: ₹{user['withdrawn']:.2f}\n"
-            f"👥 Referrals: {user['referrals']} (₹{user['referral_earnings']:.2f})\n\n"
-            f"💵 Minimum withdrawal: ₹{MIN_WITHDRAWAL}",
+            f"💰 आपका वॉलेट\n\n"
+            f"🪙 बैलेंस: ₹{user['balance']:.2f}\n"
+            f"📊 कुल कमाई: ₹{user['total_earned']:.2f}\n"
+            f"💸 निकाली गई राशि: ₹{user['withdrawn']:.2f}\n"
+            f"👥 रेफरल: {user['referrals']} (₹{user['referral_earnings']:.2f})\n"
+            f"🔗 आज पूरे किए गए लिंक: {user.get('links_completed_today', 0)} / {DAILY_LINK_LIMIT}\n\n" # Display daily count
+            f"💵 न्यूनतम निकासी: ₹{MIN_WITHDRAWAL}",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💵 Withdraw", callback_data='withdraw')],
-                [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]
+                [InlineKeyboardButton("💵 निकालें", callback_data='withdraw')],
+                [InlineKeyboardButton("🔙 वापस", callback_data='back_to_main')]
             ])
         )
 
     elif query.data == 'referral':
         clear_user_state(user_id)
         referral_message = (
-            f"👥 Referral Program\n\n"
-            f"🔗 Your referral link:\n"
+            f"👥 रेफरल प्रोग्राम\n\n"
+            f"🔗 आपकी रेफरल लिंक:\n"
             f"https://t.me/{bot_username}?start={user['referral_code']}\n\n"
-            f"💰 Earn ₹{REFERRAL_BONUS} for each friend who joins using your link AND completes {REQUIRED_LINKS_FOR_REFERRAL_BONUS} links!\n"
-            f"👥 Total referrals: {user['referrals']}\n"
-            f"💸 Earned from referrals: ₹{user['referral_earnings']:.2f}"
+            f"💰 अपने दोस्तों को अपनी लिंक का उपयोग करके जुड़ने और {REQUIRED_LINKS_FOR_REFERRAL_BONUS} लिंक पूरे करने पर प्रति मित्र ₹{REFERRAL_BONUS:.2f} कमाएं!\n"
+            f"👥 कुल रेफरल: {user['referrals']}\n"
+            f"💸 रेफरल से कमाई: ₹{user['referral_earnings']:.2f}"
         )
         await query.edit_message_text(
             referral_message,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 वापस", callback_data='back_to_main')]])
         )
 
     elif query.data == 'back_to_main':
         clear_user_state(user_id)
         keyboard = [
-            [InlineKeyboardButton("💰 Generate Link", callback_data='generate_link')],
-            [InlineKeyboardButton("📊 My Wallet", callback_data='wallet')],
-            [InlineKeyboardButton("👥 Refer Friends", callback_data='referral')]
+            [InlineKeyboardButton("💰 लिंक जनरेट करें", callback_data='generate_link')],
+            [InlineKeyboardButton("📊 मेरा वॉलेट", callback_data='wallet')],
+            [InlineKeyboardButton("👥 दोस्तों को रेफर करें", callback_data='referral')]
         ]
         await query.edit_message_text(
-            "🎉 Welcome to Earn Bot!\n"
-            f"Solve links and earn ₹{EARN_PER_LINK:.2f} per link!\n"
-            f"Minimum withdrawal: ₹{MIN_WITHDRAWAL}",
+            "🎉 Earn Bot में आपका स्वागत है!\n"
+            f"लिंक हल करें और प्रति लिंक ₹0.15 तक कमाएं!\n"
+            f"न्यूनतम निकासी: ₹{MIN_WITHDRAWAL}",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -337,72 +447,72 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user['balance'] >= MIN_WITHDRAWAL:
             keyboard = [
                 [InlineKeyboardButton("💳 UPI ID", callback_data='withdraw_upi')],
-                [InlineKeyboardButton("🏦 Bank Account", callback_data='withdraw_bank')],
-                [InlineKeyboardButton("🤳 QR Code (Screenshot)", callback_data='withdraw_qr')],
-                [InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]
+                [InlineKeyboardButton("🏦 बैंक खाता", callback_data='withdraw_bank')],
+                [InlineKeyboardButton("🤳 QR कोड (स्क्रीनशॉट)", callback_data='withdraw_qr')],
+                [InlineKeyboardButton("↩️ रद्द करें", callback_data='back_to_main')]
             ]
             await query.edit_message_text(
-                f"✅ Your balance is ₹{user['balance']:.2f}. Please select your preferred withdrawal method:",
+                f"✅ आपका बैलेंस ₹{user['balance']:.2f} है। कृपया अपनी पसंदीदा निकासी विधि चुनें:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
             await query.edit_message_text(
-                f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+                f"❌ आपका बैलेंस (₹{user['balance']:.2f}) न्यूनतम निकासी राशि ₹{MIN_WITHDRAWAL:.2f} से कम है।",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 वापस", callback_data='back_to_main')]])
             )
 
     # New withdrawal method callbacks
     elif query.data == 'withdraw_upi':
         if user['balance'] < MIN_WITHDRAWAL:
             await query.edit_message_text(
-                f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+                f"❌ आपका बैलेंस (₹{user['balance']:.2f}) न्यूनतम निकासी राशि ₹{MIN_WITHDRAWAL:.2f} से कम है।",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 वापस", callback_data='back_to_main')]])
             )
             return
         set_user_state(user_id, 'WITHDRAW_ENTER_UPI')
         await query.edit_message_text(
-            "Please send your **UPI ID** (e.g., `yourname@bank` or `phonenumber@upi`).",
+            "कृपया अपनी **UPI ID** भेजें (जैसे, `आपकानाम@बैंक` या `फ़ोननंबर@upi`)।",
             parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ रद्द करें", callback_data='back_to_main')]])
         )
     elif query.data == 'withdraw_bank':
         if user['balance'] < MIN_WITHDRAWAL:
             await query.edit_message_text(
-                f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+                f"❌ आपका बैलेंस (₹{user['balance']:.2f}) न्यूनतम निकासी राशि ₹{MIN_WITHDRAWAL:.2f} से कम है।",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 वापस", callback_data='back_to_main')]])
             )
             return
         set_user_state(user_id, 'WITHDRAW_ENTER_BANK')
         await query.edit_message_text(
-            "Please send your **Bank Account Details** in the following format:\n\n"
+            "कृपया अपने **बैंक खाते का विवरण** निम्नलिखित प्रारूप में भेजें:\n\n"
             "```\n"
-            "Account Holder Name: [Your Name]\n"
-            "Account Number: [Your Account Number]\n"
-            "IFSC Code: [Your IFSC Code]\n"
-            "Bank Name: [Your Bank Name]\n"
+            "खाता धारक का नाम: [आपका नाम]\n"
+            "खाता संख्या: [आपका खाता संख्या]\n"
+            "IFSC कोड: [आपका IFSC कोड]\n"
+            "बैंक का नाम: [आपके बैंक का नाम]\n"
             "```\n"
-            "Example:\n"
+            "उदाहरण:\n"
             "```\n"
-            "Account Holder Name: John Doe\n"
-            "Account Number: 123456789012\n"
-            "IFSC Code: SBIN0000001\n"
-            "Bank Name: State Bank of India\n"
+            "खाता धारक का नाम: जॉन डो\n"
+            "खाता संख्या: 123456789012\n"
+            "IFSC कोड: SBIN0000001\n"
+            "बैंक का नाम: स्टेट बैंक ऑफ़ इंडिया\n"
             "```",
             parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ रद्द करें", callback_data='back_to_main')]])
         )
     elif query.data == 'withdraw_qr':
         if user['balance'] < MIN_WITHDRAWAL:
             await query.edit_message_text(
-                f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]])
+                f"❌ आपका बैलेंस (₹{user['balance']:.2f}) न्यूनतम निकासी राशि ₹{MIN_WITHDRAWAL:.2f} से कम है।",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 वापस", callback_data='back_to_main')]])
             )
             return
         set_user_state(user_id, 'WITHDRAW_UPLOAD_QR')
         await query.edit_message_text(
-            "Please upload your **UPI QR Code screenshot**. Make sure the QR code is clear and visible.",
+            "कृपया अपने **UPI QR कोड का स्क्रीनशॉट** अपलोड करें। सुनिश्चित करें कि QR कोड स्पष्ट और दिखाई दे रहा हो।",
             parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ रद्द करें", callback_data='back_to_main')]])
         )
 
     # --- Admin Callbacks ---
@@ -410,12 +520,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id == ADMIN_ID:
             clear_user_state(user_id)
             set_user_state(user_id, 'GET_BALANCE_USER_ID')
-            await query.edit_message_text("Please send the User ID of the user whose balance you want to check.")
+            await query.edit_message_text("कृपया उस यूजर आईडी भेजें जिसका बैलेंस आप देखना चाहते हैं।")
     elif query.data == 'admin_add_balance':
         if user_id == ADMIN_ID:
             clear_user_state(user_id)
             set_user_state(user_id, 'ADD_BALANCE_USER_ID')
-            await query.edit_message_text("Please send the User ID of the user to whom you want to add balance.")
+            await query.edit_message_text("कृपया उस यूजर आईडी भेजें जिसे आप बैलेंस जोड़ना चाहते हैं।")
     elif query.data == 'admin_main_menu':
         if user_id == ADMIN_ID:
             clear_user_state(user_id)
@@ -434,7 +544,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
-        await update.message.reply_text("🚫 You are not authorized to use this command.")
+        await update.message.reply_text("🚫 आपको इस कमांड का उपयोग करने की अनुमति नहीं है।")
         return
 
     clear_user_state(user_id)
@@ -442,21 +552,21 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("📊 Get User Balance", callback_data='admin_get_balance')],
-        [InlineKeyboardButton("➕ Add Balance to User", callback_data='admin_add_balance')],
-        [InlineKeyboardButton("💸 Pending Withdrawals", callback_data='admin_show_pending_withdrawals')],
-        [InlineKeyboardButton("↩️ Back to Main Menu", callback_data='back_to_main')]
+        [InlineKeyboardButton("📊 यूजर बैलेंस प्राप्त करें", callback_data='admin_get_balance')],
+        [InlineKeyboardButton("➕ यूजर को बैलेंस जोड़ें", callback_data='admin_add_balance')],
+        [InlineKeyboardButton("💸 लंबित निकासी", callback_data='admin_show_pending_withdrawals')],
+        [InlineKeyboardButton("↩️ मुख्य मेनू पर वापस", callback_data='back_to_main')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if update.callback_query:
         await update.callback_query.edit_message_text(
-            "⚙️ Admin Panel Options:",
+            "⚙️ एडमिन पैनल विकल्प:",
             reply_markup=reply_markup
         )
     else:
         await update.message.reply_text(
-            "⚙️ Admin Panel Options:",
+            "⚙️ एडमिन पैनल विकल्प:",
             reply_markup=reply_markup
         )
 
@@ -465,12 +575,12 @@ async def admin_show_withdrawals(update: Update, context: ContextTypes.DEFAULT_T
 
     if not pending_requests:
         await update.callback_query.edit_message_text(
-            "✅ No pending withdrawal requests at the moment.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+            "✅ इस समय कोई लंबित निकासी अनुरोध नहीं हैं।",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
         )
         return
 
-    await update.callback_query.edit_message_text("Fetching pending withdrawal requests...")
+    await update.callback_query.edit_message_text("लंबित निकासी अनुरोध प्राप्त हो रहे हैं...")
 
     for req in pending_requests:
         user_obj = get_user(req['user_id'])
@@ -480,32 +590,32 @@ async def admin_show_withdrawals(update: Update, context: ContextTypes.DEFAULT_T
         if req['withdrawal_details']['method'] == "UPI ID":
             details_str = f"UPI ID: `{req['withdrawal_details']['id']}`"
         elif req['withdrawal_details']['method'] == "Bank Account":
-            details_str = f"Bank Details:\n```\n{req['withdrawal_details']['details']}\n```"
+            details_str = f"बैंक विवरण:\n```\n{req['withdrawal_details']['details']}\n```"
         elif req['withdrawal_details']['method'] == "QR Code":
-            details_str = f"QR Code File ID: `{req['withdrawal_details']['file_id']}`"
+            details_str = f"QR कोड फ़ाइल आईडी: `{req['withdrawal_details']['file_id']}`"
             try:
                 # Send the QR photo separately for better visibility
                 await context.bot.send_photo(
                     chat_id=ADMIN_ID,
                     photo=req['withdrawal_details']['file_id'],
-                    caption=f"QR for User `{req['user_id']}` (Amount: ₹{req['amount']:.2f})",
+                    caption=f"यूजर `{req['user_id']}` के लिए QR (राशि: ₹{req['amount']:.2f})",
                     parse_mode='Markdown'
                 )
             except Exception as e:
-                logger.error(f"Failed to resend QR photo to admin for request {req['_id']}: {e}")
-                details_str += "\n_ (Could not resend QR photo) _"
+                logger.error(f"रिक्वेस्ट {req['_id']} के लिए एडमिन को QR फोटो दोबारा भेजने में विफल: {e}")
+                details_str += "\n_ (QR फोटो दोबारा नहीं भेजी जा सकी) _"
 
         message_text = (
-            f"💸 **Pending Withdrawal Request** 💸\n"
-            f"User: [{username}](tg://user?id={req['user_id']})\n"
-            f"User ID: `{req['user_id']}`\n"
-            f"Amount: ₹{req['amount']:.2f}\n"
-            f"Method: {req['withdrawal_details']['method']}\n"
+            f"💸 **लंबित निकासी अनुरोध** 💸\n"
+            f"यूजर: [{username}](tg://user?id={req['user_id']})\n"
+            f"यूजर आईडी: `{req['user_id']}`\n"
+            f"राशि: ₹{req['amount']:.2f}\n"
+            f"विधि: {req['withdrawal_details']['method']}\n"
             f"{details_str}\n"
-            f"Requested On: {req['timestamp'].strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            f"अनुरोध किया गया: {req['timestamp'].strftime('%Y-%m-%d %H:%M:%S UTC')}"
         )
 
-        keyboard = [[InlineKeyboardButton("✅ Mark as Paid", callback_data=f"approve_payment_{req['_id']}")]]
+        keyboard = [[InlineKeyboardButton("✅ भुगतान किया गया चिह्नित करें", callback_data=f"approve_payment_{req['_id']}")]]
 
         await context.bot.send_message(
             chat_id=ADMIN_ID,
@@ -516,13 +626,13 @@ async def admin_show_withdrawals(update: Update, context: ContextTypes.DEFAULT_T
 
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text="👆 Above are all pending withdrawal requests. Click 'Mark as Paid' to process them.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+        text="👆 ऊपर सभी लंबित निकासी अनुरोध हैं। उन्हें प्रोसेस करने के लिए 'भुगतान किया गया चिह्नित करें' पर क्लिक करें।",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
     )
 
 async def admin_approve_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, request_id: str):
     query = update.callback_query
-    await query.answer("Processing payment approval...")
+    await query.answer("भुगतान अनुमोदन प्रोसेस किया जा रहा है...")
 
     try:
         request = withdrawal_requests.find_one_and_update(
@@ -537,80 +647,81 @@ async def admin_approve_payment(update: Update, context: ContextTypes.DEFAULT_TY
             withdrawal_method = request['withdrawal_details']['method']
 
             # Reset balance to 0, and increment 'withdrawn' by the amount
-            # Do NOT reset referrals/referred_by unless that's intended, as users can continue to earn
             users.update_one(
                 {"user_id": user_id},
                 {"$set": {
                     "balance": 0.0, # Reset balance to 0 after withdrawal
                     "last_click": None, # Reset last_click so they can generate new links immediately
+                    "links_completed_today": 0, # Reset daily count on withdrawal approval for fresh start
+                    "last_earning_day": datetime.utcnow().date() # Ensure day is reset
                 },
                     "$inc": {
                         "withdrawn": amount # Increment total withdrawn amount
                     }
                 }
             )
-            logger.info(f"User {user_id}'s balance reset and withdrawn amount updated after successful withdrawal of {amount}.")
+            logger.info(f"यूजर {user_id} का बैलेंस रीसेट हो गया है और सफलतापूर्वक {amount} की निकासी के बाद निकाली गई राशि अपडेट हो गई है।")
 
             # Notify the user
             try:
                 await context.bot.send_message(
                     chat_id=user_id,
-                    text=f"🎉 **Payment Successful!** 🎉\n\n"
-                         f"Your withdrawal request of ₹{amount:.2f} via {withdrawal_method} has been successfully processed.\n"
-                         f"Your earning balance has been reset to start fresh. Thank you for using Earn Bot!",
+                    text=f"🎉 **भुगतान सफल!** 🎉\n\n"
+                         f"₹{amount:.2f} की आपकी निकासी अनुरोध ({withdrawal_method} के माध्यम से) सफलतापूर्वक प्रोसेस हो गई है।\n"
+                         f"आपका कमाई बैलेंस नए सिरे से शुरू करने के लिए रीसेट कर दिया गया है। अर्न बॉट का उपयोग करने के लिए धन्यवाद!",
                     parse_mode='Markdown'
                 )
                 await query.edit_message_text(
-                    f"✅ Payment for User `{user_id}` (Request ID: `{request_id}`) marked as Paid and user notified.\n"
-                    f"User's earning balance has been reset.",
+                    f"✅ यूजर `{user_id}` (अनुरोध आईडी: `{request_id}`) के लिए भुगतान भुगतान किया गया चिह्नित किया गया और यूजर को सूचित किया गया।\n"
+                    f"यूजर का कमाई बैलेंस रीसेट कर दिया गया है।",
                     parse_mode='Markdown',
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Pending List", callback_data='admin_show_pending_withdrawals')]])
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ लंबित सूची पर वापस", callback_data='admin_show_pending_withdrawals')]])
                 )
             except TelegramError as e:
-                logger.error(f"Failed to notify user {user_id} about successful payment: {e}")
+                logger.error(f"यूजर {user_id} को सफल भुगतान के बारे में सूचित करने में विफल: {e}")
                 await query.edit_message_text(
-                    f"✅ Payment for User `{user_id}` (Request ID: `{request_id}`) marked as Paid, but failed to notify user.\n"
-                    f"User's earning balance has been reset.",
+                    f"✅ यूजर `{user_id}` (अनुरोध आईडी: `{request_id}`) के लिए भुगतान भुगतान किया गया चिह्नित किया गया, लेकिन यूजर को सूचित करने में विफल।\n"
+                    f"यूजर का कमाई बैलेंस रीसेट कर दिया गया है।",
                     parse_mode='Markdown',
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Pending List", callback_data='admin_show_pending_withdrawals')]])
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ लंबित सूची पर वापस", callback_data='admin_show_pending_withdrawals')]])
                 )
 
         else:
             await query.edit_message_text(
-                "❌ This withdrawal request was already processed or could not be found.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Pending List", callback_data='admin_show_pending_withdrawals')]])
+                "❌ यह निकासी अनुरोध पहले ही प्रोसेस हो चुका था या नहीं मिला।",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ लंबित सूची पर वापस", callback_data='admin_show_pending_withdrawals')]])
             )
 
     except Exception as e:
-        logger.error(f"Error processing payment approval for request {request_id}: {e}")
+        logger.error(f"अनुरोध {request_id} के लिए भुगतान अनुमोदन प्रोसेस करने में त्रुटि: {e}")
         await query.edit_message_text(
-            f"❌ An error occurred while approving this payment: {e}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Pending List", callback_data='admin_show_pending_withdrawals')]])
+            f"❌ इस भुगतान को अप्रूव करते समय एक त्रुटि हुई: {e}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ लंबित सूची पर वापस", callback_data='admin_show_pending_withdrawals')]])
         )
 
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
-        await update.message.reply_text("🚫 You are not authorized to use this command.")
+        await update.message.reply_text("🚫 आपको इस कमांड का उपयोग करने की अनुमति नहीं है।")
         return
     set_user_state(user_id, 'BROADCAST_MESSAGE')
     await update.message.reply_text(
-        "📝 Please send the message you want to broadcast to all users.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel Broadcast", callback_data='admin_main_menu')]])
+        "📝 कृपया वह मैसेज भेजें जिसे आप सभी यूजर्स को ब्रॉडकास्ट करना चाहते हैं।",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ ब्रॉडकास्ट रद्द करें", callback_data='admin_main_menu')]])
     )
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
-        await update.message.reply_text("🚫 You are not authorized to use this command.")
+        await update.message.reply_text("🚫 आपको इस कमांड का उपयोग करने की अनुमति नहीं है।")
         return
 
     total_users = users.count_documents({})
 
     await update.message.reply_text(
-        f"📊 Bot Statistics:\n"
-        f"Total Users: {total_users}\n"
+        f"📊 बॉट सांख्यिकी:\n"
+        f"कुल यूजर्स: {total_users}\n"
     )
 
 async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -627,25 +738,26 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             target_user = users.find_one({"user_id": target_user_id})
             if target_user:
                 await update.message.reply_text(
-                    f"User ID: `{target_user_id}`\n"
-                    f"Username: @{target_user['username'] if target_user.get('username') else 'N/A'}\n"
-                    f"Balance: ₹{target_user['balance']:.2f}\n"
-                    f"Total Earned: ₹{target_user['total_earned']:.2f}\n"
-                    f"Referrals: {target_user['referrals']}\n"
-                    f"Referred By: {target_user['referred_by'] if target_user.get('referred_by') else 'N/A'}\n"
-                    f"Links Completed: {target_user.get('links_completed', 0)}", # Display links completed
+                    f"यूजर आईडी: `{target_user_id}`\n"
+                    f"यूजरनेम: @{target_user['username'] if target_user.get('username') else 'N/A'}\n"
+                    f"बैलेंस: ₹{target_user['balance']:.2f}\n"
+                    f"कुल कमाई: ₹{target_user['total_earned']:.2f}\n"
+                    f"रेफरल: {target_user['referrals']}\n"
+                    f"रेफर किया गया: {target_user['referred_by'] if target_user.get('referred_by') else 'N/A'}\n"
+                    f"कुल लिंक पूरे किए: {target_user.get('links_completed', 0)}\n"
+                    f"आज पूरे किए गए लिंक: {target_user.get('links_completed_today', 0)} / {DAILY_LINK_LIMIT}", # Display daily count
                     parse_mode='Markdown',
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
                 )
             else:
                 await update.message.reply_text(
-                    "User not found.",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                    "यूजर नहीं मिला।",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
                 )
         except ValueError:
             await update.message.reply_text(
-                "Invalid User ID. Please send a numeric User ID.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                "अवैध यूजर आईडी। कृपया एक संख्यात्मक यूजर आईडी भेजें।",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
             )
         finally:
             clear_user_state(user_id)
@@ -655,11 +767,11 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             target_user_id = int(text_input)
             context.user_data['target_user_id_for_add'] = target_user_id
             set_user_state(user_id, 'ADD_BALANCE_AMOUNT')
-            await update.message.reply_text(f"User ID: `{target_user_id}`. Now, please send the amount to add.", parse_mode='Markdown')
+            await update.message.reply_text(f"यूजर आईडी: `{target_user_id}`। अब, कृपया जोड़ने के लिए राशि भेजें।", parse_mode='Markdown')
         except ValueError:
             await update.message.reply_text(
-                "Invalid User ID. Please send a numeric User ID.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                "अवैध यूजर आईडी। कृपया एक संख्यात्मक यूजर आईडी भेजें।",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
             )
             clear_user_state(user_id)
 
@@ -667,8 +779,8 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         target_user_id = context.user_data.get('target_user_id_for_add')
         if not target_user_id:
             await update.message.reply_text(
-                "Error: User ID not set for balance addition. Please start again from 'Add Balance to User'.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                "त्रुटि: बैलेंस जोड़ने के लिए यूजर आईडी सेट नहीं है। कृपया 'यूजर को बैलेंस जोड़ें' से फिर से शुरू करें।",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
             )
             clear_user_state(user_id)
             return
@@ -677,8 +789,8 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             amount_to_add = float(text_input)
             if amount_to_add <= 0:
                 await update.message.reply_text(
-                    "Amount must be positive.",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                    "राशि सकारात्मक होनी चाहिए।",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
                 )
                 clear_user_state(user_id)
                 return
@@ -690,30 +802,30 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     {"$inc": {"balance": amount_to_add}}
                 )
                 await update.message.reply_text(
-                    f"Successfully added ₹{amount_to_add:.2f} to user `{target_user_id}`'s balance.\n"
-                    f"New balance: ₹{target_user['balance'] + amount_to_add:.2f}",
+                    f"यूजर `{target_user_id}` के बैलेंस में सफलतापूर्वक ₹{amount_to_add:.2f} जोड़ दिए गए हैं।\n"
+                    f"नया बैलेंस: ₹{target_user['balance'] + amount_to_add:.2f}",
                     parse_mode='Markdown',
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
                 )
                 # Notify the user that balance was added (optional)
                 try:
                     await context.bot.send_message(
                         chat_id=target_user_id,
-                        text=f"💰 Your balance has been updated! ₹{amount_to_add:.2f} has been added to your account.\n"
-                             f"Your new balance is ₹{target_user['balance'] + amount_to_add:.2f}.",
+                        text=f"💰 आपका बैलेंस अपडेट हो गया है! आपके खाते में ₹{amount_to_add:.2f} जोड़ दिए गए हैं।\n"
+                             f"आपका नया बैलेंस ₹{target_user['balance'] + amount_to_add:.2f} है।",
                         parse_mode='Markdown'
                     )
                 except TelegramError as e:
-                    logger.warning(f"Could not notify user {target_user_id} about balance addition: {e}")
+                    logger.warning(f"यूजर {target_user_id} को बैलेंस जोड़ने के बारे में सूचित नहीं कर सका: {e}")
             else:
                 await update.message.reply_text(
-                    "User not found.",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                    "यूजर नहीं मिला।",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
                 )
         except ValueError:
             await update.message.reply_text(
-                "Invalid amount. Please send a numeric value.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+                "अवैध राशि। कृपया एक संख्यात्मक मान भेजें।",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
             )
         finally:
             clear_user_state(user_id)
@@ -732,19 +844,19 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 sent_count += 1
             except TelegramError as e:
                 if "blocked by the user" in str(e) or "user is deactivated" in str(e):
-                    logger.info(f"User {user_doc['user_id']} blocked the bot or is deactivated. Skipping.")
+                    logger.info(f"यूजर {user_doc['user_id']} ने बॉट को ब्लॉक कर दिया या निष्क्रिय है। छोड़ रहा है।")
                 else:
-                    logger.warning(f"Failed to send broadcast to user {user_doc['user_id']}: {e}")
+                    logger.warning(f"यूजर {user_doc['user_id']} को ब्रॉडकास्ट भेजने में विफल: {e}")
                 failed_count += 1
             except Exception as e:
                 failed_count += 1
-                logger.warning(f"An unexpected error occurred sending broadcast to user {user_doc['user_id']}: {e}")
+                logger.warning(f"यूजर {user_doc['user_id']} को ब्रॉडकास्ट भेजते समय एक अप्रत्याशित त्रुटि हुई: {e}")
 
         await update.message.reply_text(
-            f"✅ Broadcast complete!\n"
-            f"Sent to: {sent_count} users.\n"
-            f"Failed for: {failed_count} users.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Back to Admin Menu", callback_data='admin_main_menu')]])
+            f"✅ ब्रॉडकास्ट पूरा हुआ!\n"
+            f"भेजा गया: {sent_count} यूजर्स को।\n"
+            f"विफल: {failed_count} यूजर्स के लिए।",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ एडमिन मेनू पर वापस", callback_data='admin_main_menu')]])
         )
         clear_user_state(user_id)
 
@@ -757,16 +869,14 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
 
     # Only process if user is in a withdrawal state
     if not current_state or not current_state.startswith('WITHDRAW_'):
-        logger.debug(f"User {user_id} sent message while not in a withdrawal state. State: {current_state}")
-        # Optionally, you can send a generic message or just ignore.
-        # await update.message.reply_text("Please use the menu buttons to interact with the bot.")
+        logger.debug(f"यूजर {user_id} ने निकासी की स्थिति में न होने पर मैसेज भेजा। स्थिति: {current_state}")
         return
 
     # Check balance again (important for race conditions or if balance changed after callback)
     if user['balance'] < MIN_WITHDRAWAL:
         await update.message.reply_text(
-            f"❌ Your balance (₹{user['balance']:.2f}) is below the minimum withdrawal amount of ₹{MIN_WITHDRAWAL:.2f}.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
+            f"❌ आपका बैलेंस (₹{user['balance']:.2f}) न्यूनतम निकासी राशि ₹{MIN_WITHDRAWAL:.2f} से कम है।",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 मुख्य मेनू पर वापस", callback_data='back_to_main')]])
         )
         clear_user_state(user_id)
         return
@@ -774,7 +884,7 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
     if current_state == 'WITHDRAW_ENTER_UPI':
         upi_id = update.message.text.strip()
         if not upi_id:
-            await update.message.reply_text("UPI ID cannot be empty. Please send your UPI ID.")
+            await update.message.reply_text("UPI ID खाली नहीं हो सकती। कृपया अपनी UPI ID भेजें।")
             return
         withdrawal_details = {"method": "UPI ID", "id": upi_id}
         await process_withdrawal_request(update, context, user_id, user['balance'], withdrawal_details)
@@ -783,9 +893,9 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
         bank_details_raw = update.message.text.strip()
         if len(bank_details_raw) < 50: # Simple validation, can be improved
             await update.message.reply_text(
-                "Please provide complete bank account details in the specified format.",
+                "कृपया निर्दिष्ट प्रारूप में पूर्ण बैंक खाता विवरण प्रदान करें।",
                 parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ रद्द करें", callback_data='back_to_main')]])
             )
             return
         withdrawal_details = {"method": "Bank Account", "details": bank_details_raw}
@@ -798,16 +908,16 @@ async def handle_withdrawal_input_wrapper(update: Update, context: ContextTypes.
             await process_withdrawal_request(update, context, user_id, user['balance'], withdrawal_details)
         else:
             await update.message.reply_text(
-                "Please upload a **photo** of your QR Code. Text messages are not accepted for QR code withdrawals.",
+                "कृपया अपने QR कोड का **फोटो** अपलोड करें। QR कोड निकासी के लिए टेक्स्ट मैसेज स्वीकार नहीं किए जाते हैं।",
                 parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancel", callback_data='back_to_main')]])
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ रद्द करें", callback_data='back_to_main')]])
             )
             return
     else:
-        logger.warning(f"User {user_id} sent message while in unexpected withdrawal state: {current_state}")
+        logger.warning(f"यूजर {user_id} ने अप्रत्याशित निकासी स्थिति में मैसेज भेजा: {current_state}")
         await update.message.reply_text(
-            "It looks like you're in an unexpected state. Please try again from the main menu or click 'Cancel'.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
+            "आप एक अप्रत्याशित स्थिति में हैं। कृपया मुख्य मेनू से फिर से प्रयास करें या 'रद्द करें' पर क्लिक करें।",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 मुख्य मेनू पर वापस", callback_data='back_to_main')]])
         )
         clear_user_state(user_id)
 
@@ -826,30 +936,30 @@ async def process_withdrawal_request(update: Update, context: ContextTypes.DEFAU
     request_obj_id = inserted_result.inserted_id
 
     await update.message.reply_text(
-        f"🎉 Withdrawal request submitted!\n"
-        f"Amount: ₹{amount:.2f}\n"
-        f"Method: {details['method']}\n"
-        f"Your request has been sent to admin and will be processed soon. Your balance will be updated after admin approval.",
+        f"🎉 निकासी अनुरोध सबमिट किया गया!\n"
+        f"राशि: ₹{amount:.2f}\n"
+        f"विधि: {details['method']}\n"
+        f"आपका अनुरोध एडमिन को भेज दिया गया है और जल्द ही प्रोसेस किया जाएगा। एडमिन की मंजूरी के बाद आपका बैलेंस अपडेट किया जाएगा।",
         parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_to_main')]])
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 मुख्य मेनू पर वापस", callback_data='back_to_main')]])
     )
 
     # Notify admin
     admin_message = (
-        f"🚨 **New Withdrawal Request!** 🚨\n"
-        f"User ID: [`{user_id}`](tg://user?id={user_id})\n"
-        f"Amount: ₹{amount:.2f}\n"
-        f"Method: {details['method']}\n"
+        f"🚨 **नया निकासी अनुरोध!** 🚨\n"
+        f"यूजर आईडी: [`{user_id}`](tg://user?id={user_id})\n"
+        f"राशि: ₹{amount:.2f}\n"
+        f"विधि: {details['method']}\n"
     )
 
     if details['method'] == "UPI ID":
         admin_message += f"UPI ID: `{details['id']}`"
     elif details['method'] == "Bank Account":
-        admin_message += f"Bank Details:\n```\n{details['details']}\n```"
+        admin_message += f"बैंक विवरण:\n```\n{details['details']}\n```"
     elif details['method'] == "QR Code":
-        admin_message += f"QR Code File ID: `{details['file_id']}`\n(QR image will be forwarded below)"
+        admin_message += f"QR कोड फ़ाइल आईडी: `{details['file_id']}`\n(QR इमेज नीचे फॉरवर्ड की जाएगी)"
 
-    admin_keyboard = [[InlineKeyboardButton("✅ Mark as Paid", callback_data=f"approve_payment_{request_obj_id}")]]
+    admin_keyboard = [[InlineKeyboardButton("✅ भुगतान किया गया चिह्नित करें", callback_data=f"approve_payment_{request_obj_id}")]]
 
     try:
         await context.bot.send_message(
@@ -867,46 +977,45 @@ async def process_withdrawal_request(update: Update, context: ContextTypes.DEFAU
             )
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=f"⬆️ Above QR code is for User ID `{user_id}` withdrawal (Request ID: `{request_obj_id}`).",
+                text=f"⬆️ ऊपर QR कोड यूजर आईडी `{user_id}` निकासी (अनुरोध आईडी: `{request_obj_id}`) के लिए है।",
                 parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open User Chat", url=f"tg://user?id={user_id}")]])
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("यूजर चैट खोलें", url=f"tg://user?id={user_id}")]])
             )
 
     except TelegramError as e:
-        logger.error(f"Failed to notify admin {ADMIN_ID} about withdrawal request: {e}")
+        logger.error(f"एडमिन {ADMIN_ID} को निकासी अनुरोध के बारे में सूचित करने में विफल: {e}")
     finally:
         clear_user_state(user_id)
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.error("Exception while handling update:", exc_info=context.error)
+    logger.error("अपडेट को हैंडल करते समय अपवाद:", exc_info=context.error)
 
     if update:
         if update.callback_query:
             try:
-                await update.callback_query.message.reply_text('⚠️ An error occurred. Please try again.')
+                await update.callback_query.message.reply_text('⚠️ एक त्रुटि हुई। कृपया फिर से प्रयास करें।')
             except Exception as e:
-                logger.error(f"Failed to send error message to callback_query user: {e}")
+                logger.error(f"callback_query यूजर को त्रुटि संदेश भेजने में विफल: {e}")
         elif update.message:
             try:
-                await update.message.reply_text('⚠️ An error occurred. Please try again.')
+                await update.message.reply_text('⚠️ एक त्रुटि हुई। कृपया फिर से प्रयास करें।')
             except Exception as e:
-                logger.error(f"Failed to send error message to message user: {e}")
+                logger.error(f"मैसेज यूजर को त्रुटि संदेश भेजने में विफल: {e}")
         else:
-            logger.warning(f"Error occurred with unhandled update type: {update}")
+            logger.warning(f"अप्रबंधित अपडेट प्रकार के साथ त्रुटि हुई: {update}")
     else:
-        logger.warning("Error handler called with None update object.")
+        logger.warning("त्रुटि हैंडलर को कोई अपडेट ऑब्जेक्ट नहीं मिला।")
 
 async def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
     application_instance = context.job.data["application_instance"]
-    logger.info("Attempting MongoDB data cleanup...")
+    logger.info("MongoDB डेटा क्लीनअप का प्रयास किया जा रहा है...")
 
-    # Placeholder for actual DB usage check
-    # In a real scenario, you'd check actual MongoDB storage statistics.
-    db_usage_percentage = 95 # Assuming high usage for demonstration
+    total_users_count = users.count_documents({})
+    cleanup_threshold_users = 1000 # Example: if you have more than 1000 users, consider cleaning up
 
-    if db_usage_percentage >= 90:
-        logger.warning(f"MongoDB usage is at {db_usage_percentage:.2f}%. Initiating cleanup of old data.")
+    if total_users_count > cleanup_threshold_users:
+        logger.warning(f"कुल यूजर्स ({total_users_count}) क्लीनअप थ्रेशोल्ड ({cleanup_threshold_users}) से अधिक हैं। पुराने डेटा का क्लीनअप शुरू कर रहा है।")
 
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
 
@@ -916,14 +1025,14 @@ async def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
             "user_id": {"$ne": ADMIN_ID}, # Exclude admin
             "$or": [
                 {"created_at": {"$lt": thirty_days_ago}}, # Created before 30 days and inactive
-                {"last_click": {"$lt": thirty_days_ago}} # Last click before 30 days
+                {"last_click": {"$lt": thirty_days_ago}, "last_click": {"$ne": None}} # Last click before 30 days, ensure last_click exists
             ]
         }).sort("created_at", 1) # Sort by creation date to delete oldest first
 
         users_to_delete = list(users_to_delete_cursor)
 
         if not users_to_delete:
-            logger.info("No suitable non-admin users with 0 balance and inactivity found for cleanup.")
+            logger.info("क्लीनअप के लिए 0 बैलेंस और निष्क्रियता वाले कोई उपयुक्त गैर-एडमिन यूजर नहीं मिले।")
             return
 
         # Delete up to 20% of inactive users to free up space
@@ -933,32 +1042,34 @@ async def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
         deleted_count = 0
         deleted_user_ids = []
         for user_doc in users_to_delete:
-            if user_doc['user_id'] == ADMIN_ID or user_doc['balance'] > 0.0:
-                logger.warning(f"Attempted to delete user {user_doc['user_id']} with non-zero balance or ADMIN_ID during cleanup. Skipping.")
-                continue
+            # Re-check conditions before deleting to prevent race conditions or unexpected deletions
+            current_user_status = users.find_one({"_id": user_doc['_id']})
+            if current_user_status and current_user_status['balance'] == 0.0 and current_user_status['user_id'] != ADMIN_ID:
+                try:
+                    users.delete_one({"_id": user_doc['_id']})
+                    user_states.delete_one({"user_id": user_doc['user_id']}) # Also clear their state if any
+                    deleted_count += 1
+                    deleted_user_ids.append(user_doc['user_id'])
+                except Exception as e:
+                    logger.error(f"क्लीनअप के दौरान यूजर {user_doc['user_id']} को हटाने में त्रुटि: {e}")
+            else:
+                logger.warning(f"यूजर {user_doc['user_id']} अब क्लीनअप मानदंड (बैलेंस > 0 या एडमिन है) को पूरा नहीं करता है। छोड़ रहा है।")
 
-            try:
-                users.delete_one({"_id": user_doc['_id']})
-                user_states.delete_one({"user_id": user_doc['user_id']}) # Also clear their state if any
-                deleted_count += 1
-                deleted_user_ids.append(user_doc['user_id'])
-            except Exception as e:
-                logger.error(f"Error deleting user {user_doc['user_id']} during cleanup: {e}")
 
-        logger.info(f"MongoDB cleanup complete. Deleted {deleted_count} users. User IDs: {deleted_user_ids}")
+        logger.info(f"MongoDB क्लीनअप पूरा हुआ। {deleted_count} यूजर्स हटाए गए। यूजर आईडी: {deleted_user_ids}")
 
-        admin_msg = f"🧹 **MongoDB Cleanup Alert!** 🧹\n" \
-                    f"Database usage was high ({db_usage_percentage:.2f}%).\n" \
-                    f"{deleted_count} oldest *inactive users with 0 balance* have been deleted to free up space.\n" \
-                    f"Deleted User IDs: {', '.join(map(str, deleted_user_ids)) if deleted_user_ids else 'None'}"
+        admin_msg = f"🧹 **MongoDB क्लीनअप अलर्ट!** 🧹\n" \
+                    f"कुल यूजर्स थ्रेशोल्ड ({cleanup_threshold_users}) से अधिक हो गए हैं।\n" \
+                    f"डेटा प्रबंधित करने के लिए {deleted_count} सबसे पुराने *0 बैलेंस वाले निष्क्रिय यूजर्स* हटा दिए गए हैं।\n" \
+                    f"हटाए गए यूजर आईडी: {', '.join(map(str, deleted_user_ids)) if deleted_user_ids else 'कोई नहीं'}"
         try:
             await application_instance.bot.send_message(
                 chat_id=ADMIN_ID, text=admin_msg, parse_mode='Markdown'
             )
         except Exception as e:
-            logger.error(f"Failed to send cleanup notification to admin: {e}")
+            logger.error(f"एडमिन को क्लीनअप नोटिफिकेशन भेजने में विफल: {e}")
     else:
-        logger.info(f"MongoDB usage is at {db_usage_percentage:.2f}%, no cleanup needed yet.")
+        logger.info(f"कुल यूजर्स ({total_users_count}) क्लीनअप थ्रेशोल्ड ({cleanup_threshold_users}) से कम हैं। अभी कोई क्लीनअप की आवश्यकता नहीं है।")
 
 
 # Initialize the Application globally
@@ -975,7 +1086,6 @@ application.add_handler(CallbackQueryHandler(button_handler))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_admin_input))
 
 # User withdrawal input handling (text/photo messages when in specific withdrawal states)
-# This handler should only activate for users NOT ADMIN and when they are in a withdrawal state.
 application.add_handler(MessageHandler(
     (filters.TEXT | filters.PHOTO) & ~filters.COMMAND & ~filters.User(ADMIN_ID),
     handle_withdrawal_input_wrapper
@@ -986,21 +1096,22 @@ application.add_error_handler(error_handler)
 # Setup job queue for cleanup
 job_queue = application.job_queue
 if job_queue is not None:
+    # Run cleanup daily at a fixed time (e.g., 03:00 AM UTC)
     job_queue.run_repeating(cleanup_old_data, interval=timedelta(days=1), first=datetime.now() + timedelta(minutes=5),
                             data={"application_instance": application})
 else:
-    logger.error("JobQueue is not initialized. Ensure python-telegram-bot[job-queue] is installed.")
+    logger.error("JobQueue प्रारंभ नहीं किया गया है। सुनिश्चित करें कि python-telegram-bot[job-queue] इंस्टॉल है।")
 
 
 # Flask routes for health check ONLY
 @app.route('/')
 def health_check():
-    return "EarnBot is running!"
+    return "EarnBot चल रहा है!"
 
 def run_flask_server():
     """Runs the Flask health check server."""
     PORT = int(os.environ.get('PORT', 8000))
-    logger.info(f"Starting Flask server on port {PORT}")
+    logger.info(f"Flask सर्वर पोर्ट {PORT} पर शुरू हो रहा है")
     app.run(host='0.0.0.0', port=PORT, debug=False)
 
 if __name__ == '__main__':
@@ -1008,15 +1119,15 @@ if __name__ == '__main__':
     flask_server_thread.daemon = True
     flask_server_thread.start()
 
-    logger.info("Starting Telegram bot in polling mode.")
+    logger.info("टेलीग्राम बॉट पोलिंग मोड में शुरू हो रहा है।")
     try:
         application.run_polling(poll_interval=1, timeout=30)
     except KeyboardInterrupt:
-        logger.info("Bot process interrupted. Shutting down.")
+        logger.info("बॉट प्रक्रिया बाधित। बंद हो रहा है।")
         application.stop()
         client.close()
     except Exception as e:
-        logger.critical(f"An unhandled error occurred in the polling loop: {e}", exc_info=True)
+        logger.critical(f"पोलिंग लूप में एक अप्रबंधित त्रुटि हुई: {e}", exc_info=True)
         application.stop()
         client.close()
 
