@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime, timedelta, date # Import date
+from datetime import datetime, timedelta, date # Import date (though we'll primarily use datetime)
 from flask import Flask, request, abort
 from threading import Thread
 import asyncio
@@ -105,18 +105,26 @@ def get_user(user_id):
             "referred_by": None,
             "links_completed": 0, # Total links ever completed by this user
             "links_completed_today": 0, # NEW: Links completed today for daily limit
-            "last_earning_day": datetime.utcnow().date() # NEW: Last day user earned, for daily reset
+            "last_earning_day": datetime.utcnow() # CHANGED: Store full datetime, for daily reset
         }
         users.insert_one(user)
     
-    # Ensure new fields are present for existing users
+    # Ensure new fields are present for existing users and fix datetime.date issue
     # This migration logic should ideally run once on startup or as a separate script
     if "links_completed_today" not in user:
-        user["links_completed_today"] = 0
         users.update_one({"user_id": user_id}, {"$set": {"links_completed_today": 0}})
-    if "last_earning_day" not in user:
-        user["last_earning_day"] = datetime.utcnow().date()
-        users.update_one({"user_id": user_id}, {"$set": {"last_earning_day": datetime.utcnow().date()}})
+        user["links_completed_today"] = 0
+    
+    # Fix for datetime.date if it was previously stored
+    if "last_earning_day" not in user or isinstance(user["last_earning_day"], date) and not isinstance(user["last_earning_day"], datetime):
+        # If it's a date object, convert it to a datetime at the start of that day UTC
+        if isinstance(user.get("last_earning_day"), date):
+            converted_datetime = datetime(user["last_earning_day"].year, user["last_earning_day"].month, user["last_earning_day"].day, 0, 0, 0)
+            users.update_one({"user_id": user_id}, {"$set": {"last_earning_day": converted_datetime}})
+            user["last_earning_day"] = converted_datetime
+        else: # If not present or some other unexpected type, set to current UTC datetime
+            users.update_one({"user_id": user_id}, {"$set": {"last_earning_day": datetime.utcnow()}})
+            user["last_earning_day"] = datetime.utcnow()
 
     return user
 
@@ -169,7 +177,7 @@ def generate_short_link(long_url):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
-    user = get_user(user_id)
+    user = get_user(user_id) # Ensure user object is fetched with potential date fix
     bot_username = (await context.bot.get_me()).username
 
     # Update user's username in DB
@@ -179,17 +187,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_user_state(user_id)
 
     # --- Daily Link Count Reset Logic ---
-    current_date = datetime.utcnow().date()
-    if user['last_earning_day'] != current_date:
+    current_utc_date = datetime.utcnow().date()
+    # Compare only the date part of 'last_earning_day'
+    if user['last_earning_day'].date() != current_utc_date:
         users.update_one(
             {"user_id": user_id},
             {"$set": {
                 "links_completed_today": 0,
-                "last_earning_day": current_date
+                "last_earning_day": datetime.utcnow() # Store full datetime when resetting
             }}
         )
         user['links_completed_today'] = 0 # Update in current user object as well for immediate use
-        user['last_earning_day'] = current_date
+        user['last_earning_day'] = datetime.utcnow() # Update in current user object
     # --- End Daily Link Count Reset Logic ---
 
     if context.args:
@@ -267,7 +276,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "balance": new_balance,
                         "total_earned": updated_user_for_earning['total_earned'] + earning_rate,
                         "last_click": datetime.utcnow(),
-                        "last_earning_day": current_date # Ensure this is updated
+                        "last_earning_day": datetime.utcnow() # Store full datetime
                     },
                      "$inc": {
                          "links_completed": 1, # Total links ever completed
@@ -339,17 +348,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_id = query.from_user.id
-    user = get_user(user_id)
+    user = get_user(user_id) # Ensure user object is fetched with potential date fix
     bot_username = (await context.bot.get_me()).username
 
     # --- Daily Link Count Reset Logic for Callback Queries ---
-    current_date = datetime.utcnow().date()
-    if user['last_earning_day'] != current_date:
+    current_utc_date = datetime.utcnow().date()
+    # Compare only the date part of 'last_earning_day'
+    if user['last_earning_day'].date() != current_utc_date:
         users.update_one(
             {"user_id": user_id},
             {"$set": {
                 "links_completed_today": 0,
-                "last_earning_day": current_date
+                "last_earning_day": datetime.utcnow() # Store full datetime when resetting
             }}
         )
         user = get_user(user_id) # Re-fetch user object to get updated counts
@@ -653,7 +663,7 @@ async def admin_approve_payment(update: Update, context: ContextTypes.DEFAULT_TY
                     "balance": 0.0, # Reset balance to 0 after withdrawal
                     "last_click": None, # Reset last_click so they can generate new links immediately
                     "links_completed_today": 0, # Reset daily count on withdrawal approval for fresh start
-                    "last_earning_day": datetime.utcnow().date() # Ensure day is reset
+                    "last_earning_day": datetime.utcnow() # Ensure day is reset to current datetime
                 },
                     "$inc": {
                         "withdrawn": amount # Increment total withdrawn amount
@@ -1025,7 +1035,9 @@ async def cleanup_old_data(context: ContextTypes.DEFAULT_TYPE):
             "user_id": {"$ne": ADMIN_ID}, # Exclude admin
             "$or": [
                 {"created_at": {"$lt": thirty_days_ago}}, # Created before 30 days and inactive
-                {"last_click": {"$lt": thirty_days_ago}, "last_click": {"$ne": None}} # Last click before 30 days, ensure last_click exists
+                # Ensure last_click is a datetime object for comparison. Handle cases where it might be missing or date.
+                {"last_click": {"$lt": thirty_days_ago}, "last_click": {"$ne": None}}, 
+                {"last_earning_day": {"$lt": thirty_days_ago}, "last_earning_day": {"$ne": None}}
             ]
         }).sort("created_at", 1) # Sort by creation date to delete oldest first
 
